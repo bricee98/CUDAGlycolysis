@@ -1,9 +1,7 @@
 # Simulation space dimensions (width height depth)
 100 100 100
-
 # Number of molecule types
 33
-
 # Molecule counts
 # Substrates and products
 Glucose: 1000
@@ -24,7 +22,6 @@ NADH: 1000
 Proton: 1000
 Inorganic_Phosphate: 1000
 Water: 10000
-
 # Enzymes
 Hexokinase: 100
 Glucose_6_Phosphate_Isomerase: 100
@@ -36,7 +33,6 @@ Phosphoglycerate_Kinase: 100
 Phosphoglycerate_Mutase: 100
 Enolase: 100
 Pyruvate_Kinase: 100
-
 # Regulatory molecules
 AMP: 100
 Citrate: 100

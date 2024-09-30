@@ -13,7 +13,7 @@
 
 // Define constants
 #define MAX_MOLECULES 1000000
-#define MAX_MOLECULE_TYPES 15
+#define MAX_MOLECULE_TYPES 33
 #define NUM_REACTION_TYPES 10 // Update this as you add more reaction types
 
 // Constants for force calculations
