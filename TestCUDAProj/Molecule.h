@@ -1,8 +1,31 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <vector>
+#include <string>
 
-// Enumeration for molecule types
+// Enumeration for atom types
+enum AtomType {
+    HYDROGEN,
+    CARBON,
+    NITROGEN,
+    OXYGEN,
+    PHOSPHORUS,
+    SULFUR
+};
+
+// Structure to represent an individual atom
+struct Atom {
+    AtomType type;
+    float x, y, z;
+    float charge;
+    float radius;
+    float mass;
+    float bornRadius;       // Add this line
+    float inverseBornRadius; // Add this line
+};
+
+// Enumeration for molecule types (unchanged)
 enum MoleculeType {
     // Substrates and products
     GLUCOSE,
@@ -51,7 +74,7 @@ public:
     void applyForce(float fx, float fy, float fz);
 
     MoleculeType getType() const { return type; }
-    float getMass() const { return mass; }
+    float getTotalMass() const;
     void getPosition(float& x, float& y, float& z) const;
     void getVelocity(float& vx, float& vy, float& vz) const;
 
@@ -88,21 +111,28 @@ public:
     static Molecule createCitrate();
     static Molecule createFructose26Bisphosphate();
 
-    float getCharge() const { return charge; }
-    float getSigma() const { return sigma; }
-    float getEpsilon() const { return epsilon; }
+    const std::vector<Atom>& getAtoms() const { return atoms; }
+    float getBornRadius() const { return bornRadius; }
 
 protected:
     MoleculeType type;
-    float x, y, z;
+    std::vector<Atom> atoms;
     float vx, vy, vz;
-    float mass;
-    float charge;  // Electrostatic charge
-    float sigma;   // Lennard-Jones distance parameter
-    float epsilon; // Lennard-Jones energy parameter
+    float bornRadius; // Effective Born radius for GB model
+
+    void calculateBornRadius();
+    float calculateDistance(const Atom& atom1, const Atom& atom2) const;
+    float calculateOverlap(const Atom& atom1, const Atom& atom2, float distance) const;
+    float calculateSecondShellCorrection(const Atom& atom1, const Atom& atom2, float distance) const;
+    float initialEstimate(AtomType type) const;
+    void initializeAtomPositions();
 
 public:
     float getVx() const { return vx; }
     float getVy() const { return vy; }
     float getVz() const { return vz; }
+
+    float getX() const; // Center of mass X
+    float getY() const; // Center of mass Y
+    float getZ() const; // Center of mass Z
 };

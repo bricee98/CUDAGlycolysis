@@ -11,6 +11,11 @@
 #define MAX_MOLECULES 1000000
 #define MAX_MOLECULE_TYPES 15
 
+// Constants for force calculations
+#define COULOMB_CONSTANT 8.99e9f  // N*m^2/C^2
+#define CUTOFF_DISTANCE 2.0f      // nm
+#define CUTOFF_DISTANCE_SQ (CUTOFF_DISTANCE * CUTOFF_DISTANCE)
+
 // SimulationSpace structure
 struct SimulationSpace {
     int width, height, depth;
@@ -20,68 +25,12 @@ struct SimulationSpace {
 };
 
 // Function prototypes
-__global__ void calculateForces(Molecule* molecules, int num_molecules);
+__device__ float3 calculatePairwiseForce(const Molecule& mol1, const Molecule& mol2);
+__global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces);
 __global__ void updatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, float dt);
+__global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt);
 __global__ void handleInteractions(Molecule* molecules, int num_molecules);
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks);
-
-// Constants for force calculations
-#define COULOMB_CONSTANT 8.99e9f  // N*m^2/C^2
-#define CUTOFF_DISTANCE 2.0f      // nm
-#define CUTOFF_DISTANCE_SQ (CUTOFF_DISTANCE * CUTOFF_DISTANCE)
-
-__device__ float3 calculatePairwiseForce(const Molecule& mol1, const Molecule& mol2) {
-    float3 force = make_float3(0.0f, 0.0f, 0.0f);
-    float3 r;
-    r.x = mol2.getX() - mol1.getX();
-    r.y = mol2.getY() - mol1.getY();
-    r.z = mol2.getZ() - mol1.getZ();
-
-    float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
-
-    if (distSq < CUTOFF_DISTANCE_SQ && distSq > 0.0f) {
-        float dist = sqrtf(distSq);
-        float invDist = 1.0f / dist;
-
-        // Lennard-Jones force
-        float sigma = 0.5f * (mol1.getSigma() + mol2.getSigma());
-        float epsilon = sqrtf(mol1.getEpsilon() * mol2.getEpsilon());
-        float sigmaOverDist = sigma * invDist;
-        float sigmaOverDist6 = sigmaOverDist * sigmaOverDist * sigmaOverDist;
-        sigmaOverDist6 = sigmaOverDist6 * sigmaOverDist6;
-        float forceMultiplierLJ = 24.0f * epsilon * invDist * sigmaOverDist6 * (1.0f - 2.0f * sigmaOverDist6);
-
-        // Coulomb force
-        float chargeProduct = mol1.getCharge() * mol2.getCharge();
-        float forceMultiplierCoulomb = COULOMB_CONSTANT * chargeProduct * invDist * invDist;
-
-        float totalForceMultiplier = forceMultiplierLJ + forceMultiplierCoulomb;
-
-        force.x = r.x * totalForceMultiplier * invDist;
-        force.y = r.y * totalForceMultiplier * invDist;
-        force.z = r.z * totalForceMultiplier * invDist;
-    }
-
-    return force;
-}
-
-__global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_molecules) {
-        float3 totalForce = make_float3(0.0f, 0.0f, 0.0f);
-
-        for (int j = 0; j < num_molecules; ++j) {
-            if (idx != j) {
-                float3 pairForce = calculatePairwiseForce(molecules[idx], molecules[j]);
-                totalForce.x += pairForce.x;
-                totalForce.y += pairForce.y;
-                totalForce.z += pairForce.z;
-            }
-        }
-
-        forces[idx] = totalForce;
-    }
-}
 
 // Main function
 int main() {
@@ -263,12 +212,56 @@ int main() {
 }
 
 // CUDA kernels
-__global__ void calculateForces(Molecule* molecules, int num_molecules) {
+__device__ float3 calculatePairwiseForce(const Molecule& mol1, const Molecule& mol2) {
+    float3 force = make_float3(0.0f, 0.0f, 0.0f);
+    float3 r;
+    r.x = mol2.getX() - mol1.getX();
+    r.y = mol2.getY() - mol1.getY();
+    r.z = mol2.getZ() - mol1.getZ();
+
+    float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
+
+    if (distSq < CUTOFF_DISTANCE_SQ && distSq > 0.0f) {
+        float dist = sqrtf(distSq);
+        float invDist = 1.0f / dist;
+
+        // Lennard-Jones force
+        float sigma = 0.5f * (mol1.getSigma() + mol2.getSigma());
+        float epsilon = sqrtf(mol1.getEpsilon() * mol2.getEpsilon());
+        float sigmaOverDist = sigma * invDist;
+        float sigmaOverDist6 = sigmaOverDist * sigmaOverDist * sigmaOverDist;
+        sigmaOverDist6 = sigmaOverDist6 * sigmaOverDist6;
+        float forceMultiplierLJ = 24.0f * epsilon * invDist * sigmaOverDist6 * (1.0f - 2.0f * sigmaOverDist6);
+
+        // Coulomb force
+        float chargeProduct = mol1.getCharge() * mol2.getCharge();
+        float forceMultiplierCoulomb = COULOMB_CONSTANT * chargeProduct * invDist * invDist;
+
+        float totalForceMultiplier = forceMultiplierLJ + forceMultiplierCoulomb;
+
+        force.x = r.x * totalForceMultiplier * invDist;
+        force.y = r.y * totalForceMultiplier * invDist;
+        force.z = r.z * totalForceMultiplier * invDist;
+    }
+
+    return force;
+}
+
+__global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_molecules) {
-        // Implement force calculation here
-        // This is a placeholder - you'll need to implement the actual force calculations
-        molecules[idx].applyForce(0.01f, 0.01f, 0.01f);
+        float3 totalForce = make_float3(0.0f, 0.0f, 0.0f);
+
+        for (int j = 0; j < num_molecules; ++j) {
+            if (idx != j) {
+                float3 pairForce = calculatePairwiseForce(molecules[idx], molecules[j]);
+                totalForce.x += pairForce.x;
+                totalForce.y += pairForce.y;
+                totalForce.z += pairForce.z;
+            }
+        }
+
+        forces[idx] = totalForce;
     }
 }
 
@@ -279,6 +272,31 @@ __global__ void updatePositions(Molecule* molecules, int num_molecules, Simulati
         
         // Implement boundary conditions here
         // This is a simple bounce-off-walls condition
+        float x, y, z;
+        molecules[idx].getPosition(x, y, z);
+        float vx, vy, vz;
+        molecules[idx].getVelocity(vx, vy, vz);
+
+        if (x < 0 || x >= space.width) vx *= -1;
+        if (y < 0 || y >= space.height) vy *= -1;
+        if (z < 0 || z >= space.depth) vz *= -1;
+
+        molecules[idx].applyForce(vx - molecules[idx].getVx(), 
+                                  vy - molecules[idx].getVy(),
+                                  vz - molecules[idx].getVz());
+    }
+}
+
+__global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_molecules) {
+        // Apply force
+        molecules[idx].applyForce(forces[idx].x, forces[idx].y, forces[idx].z);
+
+        // Update position
+        molecules[idx].updatePosition(dt);
+        
+        // Implement boundary conditions
         float x, y, z;
         molecules[idx].getPosition(x, y, z);
         float vx, vy, vz;
@@ -306,6 +324,7 @@ __global__ void handleInteractions(Molecule* molecules, int num_molecules) {
 // Function to run the simulation
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks) {
     Molecule* dev_molecules = nullptr;
+    float3* dev_forces = nullptr;
     cudaError_t cudaStatus;
 
     // Choose which GPU to run on, change this on a multi-GPU system.
@@ -322,18 +341,16 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
         goto Error;
     }
 
+    cudaStatus = cudaMalloc((void**)&dev_forces, space->num_molecules * sizeof(float3));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
     // Copy molecules to GPU
     cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    // Allocate device memory for forces
-    float3* dev_forces;
-    cudaStatus = cudaMalloc((void**)&dev_forces, space->num_molecules * sizeof(float3));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
         goto Error;
     }
 
@@ -343,10 +360,7 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
         int blocksPerGrid = (space->num_molecules + threadsPerBlock - 1) / threadsPerBlock;
 
         calculateForces<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_forces);
-        
-        // New kernel to apply forces and update positions
         applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
-
         handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, space->num_molecules);
 
         // Check for errors after each kernel launch
@@ -375,27 +389,4 @@ Error:
     cudaFree(dev_forces);
     
     return cudaStatus;
-}
-
-__global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_molecules) {
-        // Apply force
-        molecules[idx].applyForce(forces[idx].x, forces[idx].y, forces[idx].z);
-
-        // Update position
-        molecules[idx].updatePosition(dt);
-        
-        // Implement boundary conditions
-        float x, y, z;
-        molecules[idx].getPosition(x, y, z);
-        float vx, vy, vz;
-        molecules[idx].getVelocity(vx, vy, vz);
-
-        if (x < 0 || x >= space.width) vx *= -1;
-        if (y < 0 || y >= space.height) vy *= -1;
-        if (z < 0 || z >= space.depth) vz *= -1;
-
-        molecules[idx].setVelocity(vx, vy, vz);
-    }
 }
