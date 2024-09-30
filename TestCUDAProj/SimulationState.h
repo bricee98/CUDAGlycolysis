@@ -1,5 +1,5 @@
 #pragma once
-#include "Molecule.h"
+#include "Molecule.cuh"
 #include <vector>
 
 struct MoleculeCreationInfo {

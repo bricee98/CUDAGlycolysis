@@ -1,4 +1,4 @@
-#include "Atom.h"
+#include "Atom.cuh"
 #include <cmath>
 
 // Add default constructor implementation

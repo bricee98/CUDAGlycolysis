@@ -7,8 +7,9 @@
 #include <string.h>
 #include <time.h>
 #include "SimulationSpace.h"
-#include "Molecule.h"
-#include "kernel.cu"  // Include the kernel file directly
+#include "Molecule.cuh"
+#include "Atom.cuh"
+#include "kernel.cuh"
 
 // Define constants
 #define MAX_MOLECULES 1000000
@@ -23,6 +24,10 @@
 #define K_BOLTZMANN 1.380649e-23f  // Boltzmann constant
 #define TEMPERATURE 310.15f        // Temperature in Kelvin (37°C)
 #define SOLVENT_DIELECTRIC 78.5f   // Dielectric constant of water at 37°C
+
+// Update these constants at the top of the file
+#define MAX_THREADS_PER_BLOCK 1024
+#define MAX_BLOCKS 65535
 
 // Function prototypes
 __device__ float3 calculatePairwiseForce(const Atom& atom1, const Atom& atom2, float invDist, float distSq);
@@ -136,6 +141,12 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
     Molecule* dev_molecules = nullptr;
     float3* dev_forces = nullptr;
     cudaError_t cudaStatus;
+    int threadsPerBlock = 256;
+    int blocksPerGrid = min((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock, MAX_BLOCKS);
+
+    // Declare these vectors at the beginning of the function
+    std::vector<MoleculeCreationInfo> h_creationBuffer;
+    std::vector<int> h_deletionBuffer;
 
     // Choose which GPU to run on, change this on a multi-GPU system.
     cudaStatus = cudaSetDevice(0);
@@ -167,8 +178,6 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
     // Allocate and initialize curandState
     curandState* dev_states;
     cudaMalloc(&dev_states, space->num_molecules * sizeof(curandState));
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (space->num_molecules + threadsPerBlock - 1) / threadsPerBlock;
     initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
 
     // Allocate memory for reaction counts
@@ -210,10 +219,6 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
     // Initialize numCreations and numDeletions to 0
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
-
-    // Allocate host vectors for creation and deletion buffers
-    std::vector<MoleculeCreationInfo> h_creationBuffer;
-    std::vector<int> h_deletionBuffer;
 
     // Main simulation loop
     for (int tick = 0; tick < num_ticks; tick++) {
@@ -279,8 +284,28 @@ Error:
 
 // Main function
 int main() {
+    // Get and print CUDA device properties
+    cudaDeviceProp deviceProp;
+    cudaError_t cudaStatus = cudaGetDeviceProperties(&deviceProp, 0);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaGetDeviceProperties failed! Error: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    printf("CUDA Device Properties:\n");
+    printf("  Device name: %s\n", deviceProp.name);
+    printf("  Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
+    printf("  Total global memory: %zu bytes\n", deviceProp.totalGlobalMem);
+    printf("  Max threads per block: %d\n", deviceProp.maxThreadsPerBlock);
+    printf("  Max threads dim: (%d, %d, %d)\n", deviceProp.maxThreadsDim[0], deviceProp.maxThreadsDim[1], deviceProp.maxThreadsDim[2]);
+    printf("  Max grid size: (%d, %d, %d)\n", deviceProp.maxGridSize[0], deviceProp.maxGridSize[1], deviceProp.maxGridSize[2]);
+    printf("  Warp size: %d\n", deviceProp.warpSize);
+    printf("  Memory clock rate: %d kHz\n", deviceProp.memoryClockRate);
+    printf("  Memory bus width: %d bits\n", deviceProp.memoryBusWidth);
+    printf("\n");
+
     SimulationSpace space;
-    Molecule* molecules;
+    Molecule* molecules = nullptr;
     
     // Read input from file
     FILE* input_file = fopen("input.txt", "r");
@@ -294,7 +319,12 @@ int main() {
     // Read simulation space dimensions
     while (fgets(line, sizeof(line), input_file)) {
         if (line[0] != '#') {
-            sscanf(line, "%d %d %d", &space.width, &space.height, &space.depth);
+            if (sscanf(line, "%d %d %d", &space.width, &space.height, &space.depth) != 3) {
+                fprintf(stderr, "Failed to read simulation space dimensions\n");
+                fclose(input_file);
+                return 1;
+            }
+            printf("Simulation space dimensions: %d x %d x %d\n", space.width, space.height, space.depth);
             break;
         }
     }
@@ -302,7 +332,12 @@ int main() {
     // Read number of molecule types
     while (fgets(line, sizeof(line), input_file)) {
         if (line[0] != '#') {
-            sscanf(line, "%d", &space.num_molecule_types);
+            if (sscanf(line, "%d", &space.num_molecule_types) != 1) {
+                fprintf(stderr, "Failed to read number of molecule types\n");
+                fclose(input_file);
+                return 1;
+            }
+            printf("Number of molecule types: %d\n", space.num_molecule_types);
             break;
         }
     }
@@ -317,6 +352,7 @@ int main() {
             if (sscanf(line, "%[^:]: %d", molecule_name, &count) == 2) {
                 space.molecule_counts[molecule_type] = count;
                 space.num_molecules += count;
+                printf("Molecule type %d (%s): %d\n", molecule_type, molecule_name, count);
                 molecule_type++;
             }
         }
@@ -324,8 +360,14 @@ int main() {
     
     fclose(input_file);
     
+    printf("Total number of molecules: %d\n", space.num_molecules);
+    
     // Allocate memory for molecules
     molecules = (Molecule*)malloc(space.num_molecules * sizeof(Molecule));
+    if (molecules == nullptr) {
+        fprintf(stderr, "Failed to allocate memory for molecules\n");
+        return 1;
+    }
     
     // Initialize molecules
     int molecule_index = 0;
@@ -436,17 +478,20 @@ int main() {
             float vx = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 0.1f;
             float vy = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 0.1f;
             float vz = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 0.1f;
-            molecules[molecule_index].getPosition(x, y, z);
-            molecules[molecule_index].getVelocity(vx, vy, vz);
+            molecules[molecule_index].setPosition(x, y, z);
+            // molecules[molecule_index].setVelocity(vx, vy, vz);
             molecule_index++;
         }
     }
 
+    printf("Molecules initialized successfully\n");
+
     // Run simulation
     int num_ticks = 1000; // Adjust as needed
-    cudaError_t cudaStatus = runSimulation(&space, molecules, num_ticks);
+    cudaStatus = runSimulation(&space, molecules, num_ticks);
     if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "Simulation failed!");
+        fprintf(stderr, "Simulation failed! Error: %s\n", cudaGetErrorString(cudaStatus));
+        free(molecules);
         return 1;
     }
 
@@ -455,7 +500,6 @@ int main() {
 
     return 0;
 }
-
 // CUDA kernels
 __device__ float3 calculatePairwiseForce(const Atom& atom1, const Atom& atom2, float invDist, float distSq) {
     float3 force = make_float3(0.0f, 0.0f, 0.0f);
@@ -480,79 +524,4 @@ __device__ float3 calculatePairwiseForce(const Atom& atom1, const Atom& atom2, f
     force.z = (atom2.getZ() - atom1.getZ()) * totalForceMultiplier * invDist;
 
     return force;
-}
-
-__global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_molecules) {
-        float3 totalForce = make_float3(0.0f, 0.0f, 0.0f);
-
-        for (int j = 0; j < num_molecules; ++j) {
-            if (idx != j) {
-                // Use the getAtoms() method to access the fixed-length array of atoms
-                const Atom* atoms1 = molecules[idx].getAtoms();
-                const Atom* atoms2 = molecules[j].getAtoms();
-                int atomCount1 = molecules[idx].getAtomCount();
-                int atomCount2 = molecules[j].getAtomCount();
-
-                for (int a1 = 0; a1 < atomCount1; ++a1) {
-                    for (int a2 = 0; a2 < atomCount2; ++a2) {
-                        const Atom& atom1 = atoms1[a1];
-                        const Atom& atom2 = atoms2[a2];
-
-                        float3 r;
-                        r.x = atom2.getX() - atom1.getX();
-                        r.y = atom2.getY() - atom1.getY();
-                        r.z = atom2.getZ() - atom1.getZ();
-
-                        float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
-
-                        if (distSq < CUTOFF_DISTANCE_SQ && distSq > 0.0f) {
-                            float invDist = rsqrtf(distSq);
-                            float3 pairForce = calculatePairwiseForce(atom1, atom2, invDist, distSq);
-                            totalForce.x += pairForce.x;
-                            totalForce.y += pairForce.y;
-                            totalForce.z += pairForce.z;
-                        }
-                    }
-                }
-            }
-        }
-
-        forces[idx] = totalForce;
-    }
-}
-
-__global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_molecules) {
-        Molecule& mol = molecules[idx];
-        float totalMass = mol.getTotalMass();
-        float3 force = forces[idx];
-
-        // Apply force to molecule's center of mass
-        float ax = force.x / totalMass;
-        float ay = force.y / totalMass;
-        float az = force.z / totalMass;
-
-        // Update velocity
-        mol.setVx(mol.getVx() + ax * dt);
-        mol.setVy(mol.getVy() + ay * dt);
-        mol.setVz(mol.getVz() + az * dt);
-
-        // Update positions of all atoms in the molecule
-        Atom* atoms = mol.getAtoms();
-        int atomCount = mol.getAtomCount();
-        for (int i = 0; i < atomCount; ++i) {
-            Atom& atom = atoms[i];
-            atom.setPosition(
-                fmodf(atom.getX() + mol.getVx() * dt + space.width, space.width),
-                fmodf(atom.getY() + mol.getVy() * dt + space.height, space.height),
-                fmodf(atom.getZ() + mol.getVz() * dt + space.depth, space.depth)
-            );
-        }
-
-        // Recalculate Born radii after position update
-        mol.calculateBornRadii();
-    }
 }

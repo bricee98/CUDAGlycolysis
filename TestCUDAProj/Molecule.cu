@@ -1,4 +1,4 @@
-#include "Molecule.h"
+#include "Molecule.cuh"
 #include <cmath>
 
 __host__ __device__ Molecule::Molecule()
@@ -632,4 +632,71 @@ __host__ __device__ void Molecule::setPosition(float newX, float newY, float new
     for (int i = 0; i < atomCount; ++i) {
         atoms[i].setPosition(atoms[i].getX() + dx, atoms[i].getY() + dy, atoms[i].getZ() + dz);
     }
+}
+
+__host__ __device__ Molecule Molecule::createAMP() {
+    Molecule m;
+    m.type = AMP;
+    
+    // C10H14N5O7P
+    for (int i = 0; i < 10; ++i) {
+        m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
+    }
+    for (int i = 0; i < 14; ++i) {
+        m.atoms[m.atomCount++] = Atom(HYDROGEN, 0, 0, 0, 0.05f, 1.00794f);
+    }
+    for (int i = 0; i < 5; ++i) {
+        m.atoms[m.atomCount++] = Atom(NITROGEN, 0, 0, 0, -0.3f, 14.0067f);
+    }
+    for (int i = 0; i < 7; ++i) {
+        m.atoms[m.atomCount++] = Atom(OXYGEN, 0, 0, 0, -0.2f, 15.9994f);
+    }
+    m.atoms[m.atomCount++] = Atom(PHOSPHORUS, 0, 0, 0, 0.3f, 30.973762f);
+
+    m.initializeAtomPositions();
+    m.calculateBornRadii();
+    return m;
+}
+
+__host__ __device__ Molecule Molecule::createCitrate() {
+    Molecule m;
+    m.type = CITRATE;
+    
+    // C6H8O7
+    for (int i = 0; i < 6; ++i) {
+        m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
+    }
+    for (int i = 0; i < 8; ++i) {
+        m.atoms[m.atomCount++] = Atom(HYDROGEN, 0, 0, 0, 0.05f, 1.00794f);
+    }
+    for (int i = 0; i < 7; ++i) {
+        m.atoms[m.atomCount++] = Atom(OXYGEN, 0, 0, 0, -0.2f, 15.9994f);
+    }
+
+    m.initializeAtomPositions();
+    m.calculateBornRadii();
+    return m;
+}
+
+__host__ __device__ Molecule Molecule::createFructose26Bisphosphate() {
+    Molecule m;
+    m.type = FRUCTOSE_2_6_BISPHOSPHATE;
+    
+    // C6H14O12P2
+    for (int i = 0; i < 6; ++i) {
+        m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
+    }
+    for (int i = 0; i < 14; ++i) {
+        m.atoms[m.atomCount++] = Atom(HYDROGEN, 0, 0, 0, 0.05f, 1.00794f);
+    }
+    for (int i = 0; i < 12; ++i) {
+        m.atoms[m.atomCount++] = Atom(OXYGEN, 0, 0, 0, -0.2f, 15.9994f);
+    }
+    for (int i = 0; i < 2; ++i) {
+        m.atoms[m.atomCount++] = Atom(PHOSPHORUS, 0, 0, 0, 0.3f, 30.973762f);
+    }
+
+    m.initializeAtomPositions();
+    m.calculateBornRadii();
+    return m;
 }

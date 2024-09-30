@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include "Atom.h"
+#include "Atom.cuh"
 
 #define MAX_ATOMS_PER_MOLECULE 100
 
