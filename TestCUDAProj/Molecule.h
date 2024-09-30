@@ -1,29 +1,9 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <vector>
-#include <string>
+#include "Atom.h"
 
-// Enumeration for atom types
-enum AtomType {
-    HYDROGEN,
-    CARBON,
-    NITROGEN,
-    OXYGEN,
-    PHOSPHORUS,
-    SULFUR
-};
-
-// Structure to represent an individual atom
-struct Atom {
-    AtomType type;
-    float x, y, z;
-    float charge;
-    float radius;
-    float mass;
-    float bornRadius;       // Add this line
-    float inverseBornRadius; // Add this line
-};
+#define MAX_ATOMS_PER_MOLECULE 100
 
 // Enumeration for molecule types (unchanged)
 enum MoleculeType {
@@ -65,74 +45,110 @@ enum MoleculeType {
     FRUCTOSE_2_6_BISPHOSPHATE
 };
 
+// Add a new enum to distinguish between atomic and coarse-grained molecules
+enum MoleculeRepresentation {
+    ATOMIC,
+    COARSE_GRAINED
+};
+
 class Molecule {
 public:
-    Molecule();
-    virtual ~Molecule();
+    __host__ __device__ Molecule();
+    __host__ __device__ ~Molecule();
 
-    void updatePosition(float dt);
-    void applyForce(float fx, float fy, float fz);
+    __host__ __device__ void updatePosition(float dt);
+    __host__ __device__ void applyForce(float fx, float fy, float fz);
 
-    MoleculeType getType() const { return type; }
-    float getTotalMass() const;
-    void getPosition(float& x, float& y, float& z) const;
-    void getVelocity(float& vx, float& vy, float& vz) const;
+    __host__ __device__ float getTotalMass() const;
+    __host__ __device__ void getPosition(float& outX, float& outY, float& outZ) const;
+    __host__ __device__ void getVelocity(float& outVx, float& outVy, float& outVz) const;
+
+    __host__ __device__ float getVx() const { return vx; }
+    __host__ __device__ float getVy() const { return vy; }
+    __host__ __device__ float getVz() const { return vz; }
+    __host__ __device__ void setVx(float newVx) { vx = newVx; }
+    __host__ __device__ void setVy(float newVy) { vy = newVy; }
+    __host__ __device__ void setVz(float newVz) { vz = newVz; }
+
+    __host__ __device__ void calculateBornRadii();
 
     // Static creation functions for all molecule types
-    static Molecule createGlucose();
-    static Molecule createATP();
-    static Molecule createADP();
-    static Molecule createGlucose6Phosphate();
-    static Molecule createFructose6Phosphate();
-    static Molecule createFructose16Bisphosphate();
-    static Molecule createDihydroxyacetonePhosphate();
-    static Molecule createGlyceraldehyde3Phosphate();
-    static Molecule create13Bisphosphoglycerate();
-    static Molecule create3Phosphoglycerate();
-    static Molecule create2Phosphoglycerate();
-    static Molecule createPhosphoenolpyruvate();
-    static Molecule createPyruvate();
-    static Molecule createNADPlus();
-    static Molecule createNADH();
-    static Molecule createProton();
-    static Molecule createInorganicPhosphate();
-    static Molecule createWater();
-    static Molecule createHexokinase();
-    static Molecule createGlucose6PhosphateIsomerase();
-    static Molecule createPhosphofructokinase1();
-    static Molecule createAldolase();
-    static Molecule createTriosephosphateIsomerase();
-    static Molecule createGlyceraldehyde3PhosphateDehydrogenase();
-    static Molecule createPhosphoglycerateKinase();
-    static Molecule createPhosphoglycerateMutase();
-    static Molecule createEnolase();
-    static Molecule createPyruvateKinase();
-    static Molecule createAMP();
-    static Molecule createCitrate();
-    static Molecule createFructose26Bisphosphate();
+    static __host__ __device__ Molecule createGlucose();
+    static __host__ __device__ Molecule createATP();
+    static __host__ __device__ Molecule createADP();
+    static __host__ __device__ Molecule createGlucose6Phosphate();
+    static __host__ __device__ Molecule createFructose6Phosphate();
+    static __host__ __device__ Molecule createFructose16Bisphosphate();
+    static __host__ __device__ Molecule createDihydroxyacetonePhosphate();
+    static __host__ __device__ Molecule createGlyceraldehyde3Phosphate();
+    static __host__ __device__ Molecule create13Bisphosphoglycerate();
+    static __host__ __device__ Molecule create3Phosphoglycerate();
+    static __host__ __device__ Molecule create2Phosphoglycerate();
+    static __host__ __device__ Molecule createPhosphoenolpyruvate();
+    static __host__ __device__ Molecule createPyruvate();
+    static __host__ __device__ Molecule createNADPlus();
+    static __host__ __device__ Molecule createNADH();
+    static __host__ __device__ Molecule createProton();
+    static __host__ __device__ Molecule createInorganicPhosphate();
+    static __host__ __device__ Molecule createWater();
+    static __host__ __device__ Molecule createHexokinase();
+    static __host__ __device__ Molecule createGlucose6PhosphateIsomerase();
+    static __host__ __device__ Molecule createPhosphofructokinase1();
+    static __host__ __device__ Molecule createAldolase();
+    static __host__ __device__ Molecule createTriosephosphateIsomerase();
+    static __host__ __device__ Molecule createGlyceraldehyde3PhosphateDehydrogenase();
+    static __host__ __device__ Molecule createPhosphoglycerateKinase();
+    static __host__ __device__ Molecule createPhosphoglycerateMutase();
+    static __host__ __device__ Molecule createEnolase();
+    static __host__ __device__ Molecule createPyruvateKinase();
+    static __host__ __device__ Molecule createAMP();
+    static __host__ __device__ Molecule createCitrate();
+    static __host__ __device__ Molecule createFructose26Bisphosphate();
 
-    const std::vector<Atom>& getAtoms() const { return atoms; }
-    float getBornRadius() const { return bornRadius; }
+    __host__ __device__ const Atom* getAtoms() const { return atoms; }
+    __host__ __device__ Atom* getAtoms() { return atoms; }
+    __host__ __device__ int getAtomCount() const { return atomCount; }
+
+    __host__ __device__ float getX() const;
+    __host__ __device__ float getY() const;
+    __host__ __device__ float getZ() const;
+    __host__ __device__ MoleculeType getType() const { return type; }
+
+    __host__ __device__ void setPosition(float x, float y, float z);
+
+    __host__ __device__ bool isMarkedForDeletion() const { return markedForDeletion; }
+    __host__ __device__ void markForDeletion() { markedForDeletion = true; }
+    
+    __host__ __device__ MoleculeType getCreationFlag() const { return creationFlag; }
+    __host__ __device__ void setCreationFlag(MoleculeType type) { creationFlag = type; }
+
+    __host__ __device__ MoleculeRepresentation getRepresentation() const { return representation; }
+    __host__ __device__ void setRepresentation(MoleculeRepresentation rep) { representation = rep; }
+
+    // For coarse-grained molecules
+    __host__ __device__ float3 getCenterOfMass() const { return centerOfMass; }
+    __host__ __device__ float getRadius() const { return radius; }
+    __host__ __device__ float getMass() const { return mass; }
+    __host__ __device__ void setCenterOfMass(float3 com) { centerOfMass = com; }
+    __host__ __device__ void setRadius(float r) { radius = r; }
+    __host__ __device__ void setMass(float m) { mass = m; }
 
 protected:
     MoleculeType type;
-    std::vector<Atom> atoms;
+    Atom atoms[MAX_ATOMS_PER_MOLECULE];
+    int atomCount;
     float vx, vy, vz;
-    float bornRadius; // Effective Born radius for GB model
 
-    void calculateBornRadius();
-    float calculateDistance(const Atom& atom1, const Atom& atom2) const;
-    float calculateOverlap(const Atom& atom1, const Atom& atom2, float distance) const;
-    float calculateSecondShellCorrection(const Atom& atom1, const Atom& atom2, float distance) const;
-    float initialEstimate(AtomType type) const;
-    void initializeAtomPositions();
+    __host__ __device__ float calculateDistance(const Atom& atom1, const Atom& atom2) const;
+    __host__ __device__ float calculateOverlap(const Atom& atom1, const Atom& atom2, float distance) const;
+    __host__ __device__ float calculateSecondShellCorrection(const Atom& atom1, const Atom& atom2, float distance) const;
+    __host__ __device__ void initializeAtomPositions();
 
-public:
-    float getVx() const { return vx; }
-    float getVy() const { return vy; }
-    float getVz() const { return vz; }
-
-    float getX() const; // Center of mass X
-    float getY() const; // Center of mass Y
-    float getZ() const; // Center of mass Z
+private:
+    bool markedForDeletion;
+    MoleculeType creationFlag;
+    MoleculeRepresentation representation;
+    float3 centerOfMass;  // For coarse-grained molecules
+    float radius;  // For coarse-grained molecules
+    float mass;  // For coarse-grained molecules
 };
