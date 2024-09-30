@@ -1,0 +1,43 @@
+# Simulation space dimensions (width height depth)
+100 100 100
+
+# Number of molecule types
+33
+
+# Molecule counts
+# Substrates and products
+Glucose: 1000
+ATP: 1000
+ADP: 1000
+Glucose_6_Phosphate: 500
+Fructose_6_Phosphate: 500
+Fructose_1_6_Bisphosphate: 500
+Dihydroxyacetone_Phosphate: 500
+Glyceraldehyde_3_Phosphate: 500
+1_3_Bisphosphoglycerate: 500
+3_Phosphoglycerate: 500
+2_Phosphoglycerate: 500
+Phosphoenolpyruvate: 500
+Pyruvate: 500
+NAD_Plus: 1000
+NADH: 1000
+Proton: 1000
+Inorganic_Phosphate: 1000
+Water: 10000
+
+# Enzymes
+Hexokinase: 100
+Glucose_6_Phosphate_Isomerase: 100
+Phosphofructokinase_1: 100
+Aldolase: 100
+Triosephosphate_Isomerase: 100
+Glyceraldehyde_3_Phosphate_Dehydrogenase: 100
+Phosphoglycerate_Kinase: 100
+Phosphoglycerate_Mutase: 100
+Enolase: 100
+Pyruvate_Kinase: 100
+
+# Regulatory molecules
+AMP: 100
+Citrate: 100
+Fructose_2_6_Bisphosphate: 100

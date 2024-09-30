@@ -1,0 +1,53 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+*.opendb
+*.db-shm
+*.db-wal
+*.db
+*.vsidx
+TestCUDAProj/.vs/TestCUDAProj/v17/.suo
+TestCUDAProj/x64/Debug/TestCUDAProj.tlog/link.read.1.tlog
+*.tlog
+*.log
+*.ilk
+*.vcxproj
+*.user
+*.json
+*.ipch
+*.deps
+*.cache
+*.recipe
+*.exp
+*.pdb
+TestCUDAProj/x64/Debug/TestCUDAProj.vcxproj.FileListAbsolute.txt
+TestCUDAProj/TestCUDAProj.sln
