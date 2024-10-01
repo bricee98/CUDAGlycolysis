@@ -266,9 +266,27 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         return cudaStatus;
     }
 
+    // Debug print before calculations
+    float x, y, z, vx, vy, vz;
+    molecules[500].getPosition(x, y, z);
+    molecules[500].getVelocity(vx, vy, vz);
+    printf("Debug: Molecule 500 before calculations:\n");
+    printf("  Position: (%f, %f, %f)\n", x, y, z);
+    printf("  Velocity: (%f, %f, %f)\n", vx, vy, vz);
+
     // Run kernels
     calculateForces<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_forces);
-    applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
+    
+    // Debug print for forces
+    float3 debug_force;
+    cudaMemcpy(&debug_force, &dev_forces[500], sizeof(float3), cudaMemcpyDeviceToHost);
+    printf("Debug: Force on Molecule 500: (%f, %f, %f)\n", debug_force.x, debug_force.y, debug_force.z);
+
+    applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(
+        dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
+
+    // Debug print for molecule 500 after calculations
+
     handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states, dev_reactionCounts, dev_creationBuffer, dev_numCreations, dev_deletionBuffer, dev_numDeletions);
 
     // Process creation and deletion flags
@@ -311,6 +329,13 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         fprintf(stderr, "cudaMemcpy failed!\n");
         return cudaStatus;
     }
+
+    // Debug print after calculations
+    molecules[500].getPosition(x, y, z);
+    molecules[500].getVelocity(vx, vy, vz);
+    printf("Debug: Molecule 500 after calculations:\n");
+    printf("  Position: (%f, %f, %f)\n", x, y, z);
+    printf("  Velocity: (%f, %f, %f)\n", vx, vy, vz);
 
     return cudaStatus;
 }

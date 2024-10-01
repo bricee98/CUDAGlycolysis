@@ -47,8 +47,8 @@ enum MoleculeType {
 
 // Add a new enum to distinguish between atomic and coarse-grained molecules
 enum MoleculeRepresentation {
-    ATOMIC,
-    COARSE_GRAINED
+    ATOMIC = 0,
+    COARSE_GRAINED = 1
 };
 
 class Molecule {
@@ -62,6 +62,7 @@ public:
     __host__ __device__ float getTotalMass() const;
     __host__ __device__ void getPosition(float& outX, float& outY, float& outZ) const;
     __host__ __device__ void getVelocity(float& outVx, float& outVy, float& outVz) const;
+    __host__ __device__ void setVelocity(float newVx, float newVy, float newVz);
 
     __host__ __device__ float getVx() const { return vx; }
     __host__ __device__ float getVy() const { return vy; }
@@ -125,17 +126,20 @@ public:
     __host__ __device__ MoleculeRepresentation getRepresentation() const { return representation; }
     __host__ __device__ void setRepresentation(MoleculeRepresentation rep) { representation = rep; }
 
+    __host__ __device__ void updateCenterOfMass();
+
     // For coarse-grained molecules
-    __host__ __device__ float3 getCenterOfMass() const { return centerOfMass; }
+    __host__ __device__ float3 getCenterOfMass() const;
     __host__ __device__ float getRadius() const { return radius; }
     __host__ __device__ float getMass() const { return mass; }
     __host__ __device__ void setCenterOfMass(float3 com) { centerOfMass = com; }
     __host__ __device__ void setRadius(float r) { radius = r; }
     __host__ __device__ void setMass(float m) { mass = m; }
 
+    Atom atoms[MAX_ATOMS_PER_MOLECULE];
+
 protected:
     MoleculeType type;
-    Atom atoms[MAX_ATOMS_PER_MOLECULE];
     int atomCount;
     float vx, vy, vz;
 

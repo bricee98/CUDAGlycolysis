@@ -1,5 +1,11 @@
 #include "Molecule.cuh"
 #include <cmath>
+#include <cstdio>
+
+__host__ __device__ float randomFloat(float min, float max) {
+    float random = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    return min + random * (max - min);
+}
 
 __host__ __device__ Molecule::Molecule()
     : type(WATER), vx(0), vy(0), vz(0), markedForDeletion(false), creationFlag(WATER), atomCount(0) {}
@@ -45,31 +51,17 @@ __host__ __device__ void Molecule::getVelocity(float& outVx, float& outVy, float
 }
 
 __host__ __device__ float Molecule::getX() const {
-    float totalMass = getTotalMass();
-    float centerX = 0;
-    for (int i = 0; i < atomCount; ++i) {
-        centerX += atoms[i].getX() * atoms[i].getMass();
-    }
-    return centerX / totalMass;
+    return centerOfMass.x;
 }
 
 __host__ __device__ float Molecule::getY() const {
-    float totalMass = getTotalMass();
-    float centerY = 0;
-    for (int i = 0; i < atomCount; ++i) {
-        centerY += atoms[i].getY() * atoms[i].getMass();
-    }
-    return centerY / totalMass;
+    return centerOfMass.y;
 }
 
 __host__ __device__ float Molecule::getZ() const {
-    float totalMass = getTotalMass();
-    float centerZ = 0;
-    for (int i = 0; i < atomCount; ++i) {
-        centerZ += atoms[i].getZ() * atoms[i].getMass();
-    }
-    return centerZ / totalMass;
+    return centerOfMass.z;
 }
+
 
 __host__ __device__ void Molecule::calculateBornRadii() {
     const float minAllowedRadius = 0.1f;
@@ -140,11 +132,14 @@ __host__ __device__ void Molecule::initializeAtomPositions() {
             }
         }
     }
+
+    updateCenterOfMass();
 }
 
 __host__ __device__ Molecule Molecule::createGlucose() {
     Molecule m;
     m.type = GLUCOSE;
+    m.representation = ATOMIC;
     m.atomCount = 0;
     
     // C6H12O6
@@ -160,12 +155,22 @@ __host__ __device__ Molecule Molecule::createGlucose() {
 
     m.initializeAtomPositions();
     m.calculateBornRadii();
+
+    // Add random initial velocity
+    float maxInitialVelocity = 10.0f; // Adjust this value as needed
+    m.setVelocity(
+        randomFloat(-maxInitialVelocity, maxInitialVelocity),
+        randomFloat(-maxInitialVelocity, maxInitialVelocity),
+        randomFloat(-maxInitialVelocity, maxInitialVelocity)
+    );
+
     return m;
 }
 
 __host__ __device__ Molecule Molecule::createATP() {
     Molecule m;
     m.type = ATP;
+    m.representation = ATOMIC;
     
     // C10H16N5O13P3
     for (int i = 0; i < 10; ++i) {
@@ -192,6 +197,7 @@ __host__ __device__ Molecule Molecule::createATP() {
 __host__ __device__ Molecule Molecule::createADP() {
     Molecule m;
     m.type = ADP;
+    m.representation = ATOMIC;
     
     // C10H15N5O10P2
     for (int i = 0; i < 10; ++i) {
@@ -218,6 +224,7 @@ __host__ __device__ Molecule Molecule::createADP() {
 __host__ __device__ Molecule Molecule::createGlucose6Phosphate() {
     Molecule m;
     m.type = GLUCOSE_6_PHOSPHATE;
+    m.representation = ATOMIC;
     
     // C6H13O9P
     for (int i = 0; i < 6; ++i) {
@@ -239,6 +246,7 @@ __host__ __device__ Molecule Molecule::createGlucose6Phosphate() {
 __host__ __device__ Molecule Molecule::createWater() {
     Molecule m;
     m.type = WATER;
+    m.representation = ATOMIC;
     
     // H2O
     m.atoms[m.atomCount++] = Atom(OXYGEN, 0, 0, 0, -0.834f, 15.9994f);
@@ -263,6 +271,7 @@ __host__ __device__ Molecule Molecule::createHexokinase() {
 __host__ __device__ Molecule Molecule::createFructose6Phosphate() {
     Molecule m;
     m.type = FRUCTOSE_6_PHOSPHATE;
+    m.representation = ATOMIC;
     
     // C6H13O9P
     for (int i = 0; i < 6; ++i) {
@@ -284,6 +293,7 @@ __host__ __device__ Molecule Molecule::createFructose6Phosphate() {
 __host__ __device__ Molecule Molecule::createFructose16Bisphosphate() {
     Molecule m;
     m.type = FRUCTOSE_1_6_BISPHOSPHATE;
+    m.representation = ATOMIC;
     
     // C6H14O12P2
     for (int i = 0; i < 6; ++i) {
@@ -307,6 +317,7 @@ __host__ __device__ Molecule Molecule::createFructose16Bisphosphate() {
 __host__ __device__ Molecule Molecule::createDihydroxyacetonePhosphate() {
     Molecule m;
     m.type = DIHYDROXYACETONE_PHOSPHATE;
+    m.representation = ATOMIC;
     
     // C3H7O6P
     for (int i = 0; i < 3; ++i) {
@@ -328,6 +339,7 @@ __host__ __device__ Molecule Molecule::createDihydroxyacetonePhosphate() {
 __host__ __device__ Molecule Molecule::createGlyceraldehyde3Phosphate() {
     Molecule m;
     m.type = GLYCERALDEHYDE_3_PHOSPHATE;
+    m.representation = ATOMIC;
     
     // C3H7O6P
     for (int i = 0; i < 3; ++i) {
@@ -349,6 +361,7 @@ __host__ __device__ Molecule Molecule::createGlyceraldehyde3Phosphate() {
 __host__ __device__ Molecule Molecule::create13Bisphosphoglycerate() {
     Molecule m;
     m.type = _1_3_BISPHOSPHOGLYCERATE;
+    m.representation = ATOMIC;
     
     // C3H8O10P2
     for (int i = 0; i < 3; ++i) {
@@ -372,6 +385,7 @@ __host__ __device__ Molecule Molecule::create13Bisphosphoglycerate() {
 __host__ __device__ Molecule Molecule::create3Phosphoglycerate() {
     Molecule m;
     m.type = _3_PHOSPHOGLYCERATE;
+    m.representation = ATOMIC;
     
     // C3H7O7P
     for (int i = 0; i < 3; ++i) {
@@ -393,7 +407,7 @@ __host__ __device__ Molecule Molecule::create3Phosphoglycerate() {
 __host__ __device__ Molecule Molecule::create2Phosphoglycerate() {
     Molecule m;
     m.type = _2_PHOSPHOGLYCERATE;
-    
+    m.representation = ATOMIC;
     // C3H7O7P
     for (int i = 0; i < 3; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -414,7 +428,7 @@ __host__ __device__ Molecule Molecule::create2Phosphoglycerate() {
 __host__ __device__ Molecule Molecule::createPhosphoenolpyruvate() {
     Molecule m;
     m.type = PHOSPHOENOLPYRUVATE;
-    
+    m.representation = ATOMIC;
     // C3H5O6P
     for (int i = 0; i < 3; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -435,7 +449,7 @@ __host__ __device__ Molecule Molecule::createPhosphoenolpyruvate() {
 __host__ __device__ Molecule Molecule::createPyruvate() {
     Molecule m;
     m.type = PYRUVATE;
-    
+    m.representation = ATOMIC;
     // C3H4O3
     for (int i = 0; i < 3; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -455,7 +469,7 @@ __host__ __device__ Molecule Molecule::createPyruvate() {
 __host__ __device__ Molecule Molecule::createNADPlus() {
     Molecule m;
     m.type = NAD_PLUS;
-    
+    m.representation = ATOMIC;
     // C21H28N7O14P2 (simplified)
     for (int i = 0; i < 21; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -481,7 +495,7 @@ __host__ __device__ Molecule Molecule::createNADPlus() {
 __host__ __device__ Molecule Molecule::createNADH() {
     Molecule m;
     m.type = NADH;
-    
+    m.representation = ATOMIC;
     // C21H29N7O14P2 (simplified)
     for (int i = 0; i < 21; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -507,7 +521,7 @@ __host__ __device__ Molecule Molecule::createNADH() {
 __host__ __device__ Molecule Molecule::createProton() {
     Molecule m;
     m.type = PROTON;
-    
+    m.representation = ATOMIC;
     // H+
     m.atoms[m.atomCount++] = Atom(HYDROGEN, 0, 0, 0, 1.0f, 1.00794f);
 
@@ -519,7 +533,7 @@ __host__ __device__ Molecule Molecule::createProton() {
 __host__ __device__ Molecule Molecule::createInorganicPhosphate() {
     Molecule m;
     m.type = INORGANIC_PHOSPHATE;
-    
+    m.representation = ATOMIC;
     // PO4^3-
     m.atoms[m.atomCount++] = Atom(PHOSPHORUS, 0, 0, 0, 0.3f, 30.973762f);
     for (int i = 0; i < 4; ++i) {
@@ -623,21 +637,25 @@ __host__ __device__ Molecule Molecule::createPyruvateKinase() {
 }
 
 __host__ __device__ void Molecule::setPosition(float newX, float newY, float newZ) {
-  
-    // Update positions of all atoms relative to the new center
-    float dx = newX - getX();
-    float dy = newY - getY();
-    float dz = newZ - getZ();
-    
+    float dx = newX - centerOfMass.x;
+    float dy = newY - centerOfMass.y;
+    float dz = newZ - centerOfMass.z;
+
     for (int i = 0; i < atomCount; ++i) {
-        atoms[i].setPosition(atoms[i].getX() + dx, atoms[i].getY() + dy, atoms[i].getZ() + dz);
+        atoms[i].setPosition(
+            atoms[i].getX() + dx,
+            atoms[i].getY() + dy,
+            atoms[i].getZ() + dz
+        );
     }
+
+    centerOfMass = make_float3(newX, newY, newZ);
 }
 
 __host__ __device__ Molecule Molecule::createAMP() {
     Molecule m;
     m.type = AMP;
-    
+    m.representation = ATOMIC;
     // C10H14N5O7P
     for (int i = 0; i < 10; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -661,7 +679,7 @@ __host__ __device__ Molecule Molecule::createAMP() {
 __host__ __device__ Molecule Molecule::createCitrate() {
     Molecule m;
     m.type = CITRATE;
-    
+    m.representation = ATOMIC;
     // C6H8O7
     for (int i = 0; i < 6; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -681,7 +699,7 @@ __host__ __device__ Molecule Molecule::createCitrate() {
 __host__ __device__ Molecule Molecule::createFructose26Bisphosphate() {
     Molecule m;
     m.type = FRUCTOSE_2_6_BISPHOSPHATE;
-    
+    m.representation = ATOMIC;
     // C6H14O12P2
     for (int i = 0; i < 6; ++i) {
         m.atoms[m.atomCount++] = Atom(CARBON, 0, 0, 0, 0.1f, 12.0107f);
@@ -699,4 +717,58 @@ __host__ __device__ Molecule Molecule::createFructose26Bisphosphate() {
     m.initializeAtomPositions();
     m.calculateBornRadii();
     return m;
+}
+
+__host__ __device__ void Molecule::setVelocity(float newVx, float newVy, float newVz) {
+    vx = newVx;
+    vy = newVy;
+    vz = newVz;
+}
+
+__host__ __device__ float3 Molecule::getCenterOfMass() const {
+    if (representation == COARSE_GRAINED) {
+        return centerOfMass;
+    } else {
+        float3 com = make_float3(0.0f, 0.0f, 0.0f);
+        float totalMass = 0.0f;
+        
+        for (int i = 0; i < atomCount; ++i) {
+            float atomMass = atoms[i].getMass();
+            com.x += atoms[i].getX() * atomMass;
+            com.y += atoms[i].getY() * atomMass;
+            com.z += atoms[i].getZ() * atomMass;
+            totalMass += atomMass;
+        }
+        
+        if (totalMass > 0.0f) {
+            com.x /= totalMass;
+            com.y /= totalMass;
+            com.z /= totalMass;
+        }
+        
+        return com;
+    }
+}
+
+__host__ __device__ void Molecule::updateCenterOfMass() {
+    if (representation == COARSE_GRAINED) {
+        // For coarse-grained molecules, centerOfMass is already set
+        return;
+    } else {
+        float totalMass = 0.0f;
+        float3 com = make_float3(0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < atomCount; ++i) {
+            float mass = atoms[i].getMass();
+            com.x += atoms[i].getX() * mass;
+            com.y += atoms[i].getY() * mass;
+            com.z += atoms[i].getZ() * mass;
+            totalMass += mass;
+        }
+        if (totalMass > 0) {
+            com.x /= totalMass;
+            com.y /= totalMass;
+            com.z /= totalMass;
+        }
+        centerOfMass = com;
+    }
 }

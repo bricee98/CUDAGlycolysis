@@ -255,7 +255,7 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* force
         float totalMass = mol.getTotalMass();
         float3 force = forces[idx];
 
-        // Apply force to molecule's center of mass
+        // Apply acceleration
         float ax = force.x / totalMass;
         float ay = force.y / totalMass;
         float az = force.z / totalMass;
@@ -266,18 +266,21 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* force
         mol.setVz(mol.getVz() + az * dt);
 
         if (mol.getRepresentation() == ATOMIC) {
-            // Update positions of all atoms in the molecule
+            // Update positions of all atoms
             Atom* atoms = mol.getAtoms();
             int atomCount = mol.getAtomCount();
             for (int i = 0; i < atomCount; ++i) {
                 Atom& atom = atoms[i];
-                atom.setPosition(
-                    fmodf(atom.getX() + mol.getVx() * dt + space.width, space.width),
-                    fmodf(atom.getY() + mol.getVy() * dt + space.height, space.height),
-                    fmodf(atom.getZ() + mol.getVz() * dt + space.depth, space.depth)
-                );
+                float newX = fmodf(atom.getX() + mol.getVx() * dt + space.width, space.width);
+                float newY = fmodf(atom.getY() + mol.getVy() * dt + space.height, space.height);
+                float newZ = fmodf(atom.getZ() + mol.getVz() * dt + space.depth, space.depth);
+                atom.setPosition(newX, newY, newZ);
             }
+
             mol.calculateBornRadii();
+
+            // Update center of mass
+            mol.updateCenterOfMass();
         } else {
             // Update center of mass for coarse-grained molecules
             float3 com = mol.getCenterOfMass();
