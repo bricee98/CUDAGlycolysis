@@ -1,4 +1,7 @@
-﻿#include <cuda_runtime.h>
+﻿#include <GL/glew.h>
+#include <GL/gl.h>
+#include <GLFW/glfw3.h>
+#include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <curand.h>
 #include <curand_kernel.h>
@@ -10,6 +13,7 @@
 #include "Molecule.cuh"
 #include "Atom.cuh"
 #include "kernel.cuh"
+#include "visualization.h"
 
 // Define constants
 #define MAX_MOLECULES 1000000
@@ -29,11 +33,16 @@
 #define MAX_THREADS_PER_BLOCK 1024
 #define MAX_BLOCKS 65535
 
+// Define window and isPaused
+GLFWwindow* window;
+bool isPaused = false;
+
 // Function prototypes
 __device__ float3 calculatePairwiseForce(const Atom& atom1, const Atom& atom2, float invDist, float distSq);
 __global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces);
 __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt);
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks);
+cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules);
 
 // Add this function before the main() function
 
@@ -175,181 +184,134 @@ void processCreationDeletionFlags(Molecule* molecules, int* num_molecules, int m
     }
 }
 
-// Function to run the simulation
+// Modify the runSimulation function to use runSimulationStep
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks) {
     printf("Starting simulation with %d molecules for %d ticks\n", space->num_molecules, num_ticks);
 
-    Molecule* dev_molecules = nullptr;
-    float3* dev_forces = nullptr;
     cudaError_t cudaStatus;
-    int threadsPerBlock = 256;
-    int blocksPerGrid = min((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock, MAX_BLOCKS);
-
-    printf("Using %d threads per block and %d blocks per grid\n", threadsPerBlock, blocksPerGrid);
-
-    // Declare these vectors at the beginning of the function
-    std::vector<MoleculeCreationInfo> h_creationBuffer;
-    std::vector<int> h_deletionBuffer;
 
     // Choose which GPU to run on, change this on a multi-GPU system.
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed! Do you have a CUDA-capable GPU installed?\n");
-        goto Error;
+        return cudaStatus;
     }
     printf("CUDA device set successfully\n");
-
-    // Allocate GPU buffers
-    cudaStatus = cudaMalloc((void**)&dev_molecules, space->num_molecules * sizeof(Molecule));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed for dev_molecules!\n");
-        goto Error;
-    }
-    printf("Allocated GPU memory for molecules\n");
-
-    cudaStatus = cudaMalloc((void**)&dev_forces, space->num_molecules * sizeof(float3));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed for dev_forces!\n");
-        goto Error;
-    }
-    printf("Allocated GPU memory for forces\n");
-
-    // Copy molecules to GPU
-    cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed for molecules!\n");
-        goto Error;
-    }
-    printf("Copied molecules to GPU\n");
-
-    // Allocate and initialize curandState
-    curandState* dev_states;
-    cudaMalloc(&dev_states, space->num_molecules * sizeof(curandState));
-    initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
-    printf("Initialized curandState\n");
-
-    // Allocate memory for reaction counts
-    int* dev_reactionCounts;
-    cudaMalloc(&dev_reactionCounts, NUM_REACTION_TYPES * sizeof(int));
-    cudaMemset(dev_reactionCounts, 0, NUM_REACTION_TYPES * sizeof(int));
-    printf("Allocated and initialized reaction counts\n");
-
-    // Allocate GPU buffers for num_molecules
-    int* dev_num_molecules;
-    cudaStatus = cudaMalloc((void**)&dev_num_molecules, sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed for dev_num_molecules!\n");
-        goto Error;
-    }
-
-    // Copy num_molecules to GPU
-    cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed for dev_num_molecules!\n");
-        goto Error;
-    }
-    printf("Allocated and copied num_molecules to GPU\n");
-
-    // Allocate GPU buffers for creation and deletion
-    MoleculeCreationInfo* dev_creationBuffer;
-    int* dev_numCreations;
-    int* dev_deletionBuffer;
-    int* dev_numDeletions;
-
-    cudaStatus = cudaMalloc((void**)&dev_creationBuffer, MAX_MOLECULES * sizeof(MoleculeCreationInfo));
-    cudaStatus = cudaMalloc((void**)&dev_numCreations, sizeof(int));
-    cudaStatus = cudaMalloc((void**)&dev_deletionBuffer, MAX_MOLECULES * sizeof(int));
-    cudaStatus = cudaMalloc((void**)&dev_numDeletions, sizeof(int));
-
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed for creation/deletion buffers!\n");
-        goto Error;
-    }
-    printf("Allocated GPU memory for creation and deletion buffers\n");
-
-    // Initialize numCreations and numDeletions to 0
-    cudaMemset(dev_numCreations, 0, sizeof(int));
-    cudaMemset(dev_numDeletions, 0, sizeof(int));
-    printf("Initialized creation and deletion counters\n");
 
     // Main simulation loop
     for (int tick = 0; tick < num_ticks; tick++) {
         printf("Starting tick %d\n", tick);
-
-        // Calculate forces
-        calculateForces<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_forces);
-        printf("  Calculated forces\n");
-
-        // Apply forces and update positions
-        applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
-        printf("  Applied forces and updated positions\n");
-
-        handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states, dev_reactionCounts, dev_creationBuffer, dev_numCreations, dev_deletionBuffer, dev_numDeletions);
-        printf("  Handled interactions\n");
-
-        // Copy creation and deletion buffers from device to host
-        int h_numCreations, h_numDeletions;
-        cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
-
-        h_creationBuffer.resize(h_numCreations);
-        h_deletionBuffer.resize(h_numDeletions);
-        cudaMemcpy(h_creationBuffer.data(), dev_creationBuffer, h_numCreations * sizeof(MoleculeCreationInfo), cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_deletionBuffer.data(), dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
-
-        printf("  Copied creation and deletion data to host. Creations: %d, Deletions: %d\n", h_numCreations, h_numDeletions);
-
-        // Process creation and deletion flags on the host
-        processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES, h_creationBuffer.data(), h_numCreations, h_deletionBuffer.data(), h_numDeletions);
-        printf("  Processed creation and deletion flags. New molecule count: %d\n", space->num_molecules);
-
-        // Update device memory with new molecule data
-        cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
-        cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
-        printf("  Updated GPU with new molecule data\n");
-
-        // Reset numCreations and numDeletions to 0 for the next tick
-        cudaMemset(dev_numCreations, 0, sizeof(int));
-        cudaMemset(dev_numDeletions, 0, sizeof(int));
-
-        // Check for errors after each kernel launch
-        cudaStatus = cudaGetLastError();
+        
+        cudaStatus = runSimulationStep(space, molecules);
         if (cudaStatus != cudaSuccess) {
-            fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-            goto Error;
-        }
-
-        cudaStatus = cudaDeviceSynchronize();
-        if (cudaStatus != cudaSuccess) {
-            fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching kernels!\n", cudaStatus);
-            goto Error;
+            fprintf(stderr, "Simulation step failed! Error: %s\n", cudaGetErrorString(cudaStatus));
+            break;
         }
 
         printf("Completed tick %d\n", tick);
     }
 
+    printf("Simulation completed\n");
+
+    return cudaStatus;
+}
+
+// Add the new runSimulationStep function
+cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
+    static Molecule* dev_molecules = nullptr;
+    static float3* dev_forces = nullptr;
+    static curandState* dev_states = nullptr;
+    static int* dev_reactionCounts = nullptr;
+    static int* dev_num_molecules = nullptr;
+    static MoleculeCreationInfo* dev_creationBuffer = nullptr;
+    static int* dev_numCreations = nullptr;
+    static int* dev_deletionBuffer = nullptr;
+    static int* dev_numDeletions = nullptr;
+
+    cudaError_t cudaStatus;
+    int threadsPerBlock = 256;
+    int blocksPerGrid = min((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock, MAX_BLOCKS);
+
+    // Initialize device memory if it's the first run
+    if (dev_molecules == nullptr) {
+        // Allocate GPU buffers and copy data
+        cudaStatus = cudaMalloc((void**)&dev_molecules, MAX_MOLECULES * sizeof(Molecule));
+        cudaStatus = cudaMalloc((void**)&dev_forces, MAX_MOLECULES * sizeof(float3));
+        cudaStatus = cudaMalloc((void**)&dev_states, MAX_MOLECULES * sizeof(curandState));
+        cudaStatus = cudaMalloc(&dev_reactionCounts, NUM_REACTION_TYPES * sizeof(int));
+        cudaStatus = cudaMalloc((void**)&dev_num_molecules, sizeof(int));
+        cudaStatus = cudaMalloc((void**)&dev_creationBuffer, MAX_MOLECULES * sizeof(MoleculeCreationInfo));
+        cudaStatus = cudaMalloc((void**)&dev_numCreations, sizeof(int));
+        cudaStatus = cudaMalloc((void**)&dev_deletionBuffer, MAX_MOLECULES * sizeof(int));
+        cudaStatus = cudaMalloc((void**)&dev_numDeletions, sizeof(int));
+
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed!\n");
+            return cudaStatus;
+        }
+
+        // Initialize curandState
+        initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
+    }
+
+    // Copy current state to device
+    cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
+    cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(dev_reactionCounts, 0, NUM_REACTION_TYPES * sizeof(int));
+    cudaMemset(dev_numCreations, 0, sizeof(int));
+    cudaMemset(dev_numDeletions, 0, sizeof(int));
+
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!\n");
+        return cudaStatus;
+    }
+
+    // Run kernels
+    calculateForces<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_forces);
+    applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
+    handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states, dev_reactionCounts, dev_creationBuffer, dev_numCreations, dev_deletionBuffer, dev_numDeletions);
+
+    // Process creation and deletion flags
+    int h_numCreations, h_numDeletions;
+    cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
+
+    std::vector<MoleculeCreationInfo> h_creationBuffer(h_numCreations);
+    std::vector<int> h_deletionBuffer(h_numDeletions);
+    cudaMemcpy(h_creationBuffer.data(), dev_creationBuffer, h_numCreations * sizeof(MoleculeCreationInfo), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_deletionBuffer.data(), dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
+
+    processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES, h_creationBuffer.data(), h_numCreations, h_deletionBuffer.data(), h_numDeletions);
+
+    // Copy results back to device
+    cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
+    cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
+
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!\n");
+        return cudaStatus;
+    }
+
+    // Check for errors
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        return cudaStatus;
+    }
+
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching kernels!\n", cudaStatus);
+        return cudaStatus;
+    }
+
     // Copy results back to host
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "Final cudaMemcpy failed!\n");
-        goto Error;
+        fprintf(stderr, "cudaMemcpy failed!\n");
+        return cudaStatus;
     }
-    printf("Copied final results back to host\n");
 
-    printf("Simulation completed successfully\n");
-
-Error:
-    printf("Freeing GPU memory\n");
-    cudaFree(dev_molecules);
-    cudaFree(dev_forces);
-    cudaFree(dev_states);
-    cudaFree(dev_reactionCounts);
-    cudaFree(dev_num_molecules);
-    cudaFree(dev_creationBuffer);
-    cudaFree(dev_numCreations);
-    cudaFree(dev_deletionBuffer);
-    cudaFree(dev_numDeletions);
-    
     return cudaStatus;
 }
 
@@ -496,16 +458,26 @@ int main() {
 
     printf("\nTotal molecules initialized successfully: %d\n", molecule_index);
 
-    // Run simulation
-    int num_ticks = 1000; // Adjust as needed
-    cudaStatus = runSimulation(&space, molecules, num_ticks);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "Simulation failed! Error: %s\n", cudaGetErrorString(cudaStatus));
-        free(molecules);
-        return 1;
+    // Initialize visualization
+    initVisualization();
+
+    // Main simulation loop
+    while (!glfwWindowShouldClose(window)) {
+        if (!isPaused) {
+            // Run a single step of the simulation
+            cudaStatus = runSimulationStep(&space, molecules);
+            if (cudaStatus != cudaSuccess) {
+                fprintf(stderr, "Simulation step failed! Error: %s\n", cudaGetErrorString(cudaStatus));
+                break;
+            }
+        }
+
+        // Render the current state of the simulation
+        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules));
     }
 
-    // Free memory
+    // Cleanup
+    cleanupVisualization();
     free(molecules);
 
     return 0;
