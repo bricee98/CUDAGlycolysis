@@ -74,7 +74,7 @@ __host__ void Molecule::initializeAtoms() {
 
 // Helper function to set random initial velocity
 __host__ void setRandomVelocity(Molecule& m) {
-    float maxInitialVelocity = 1.0f;
+    float maxInitialVelocity = 0.3f;
     m.vx = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;
     m.vy = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;
     m.vz = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;

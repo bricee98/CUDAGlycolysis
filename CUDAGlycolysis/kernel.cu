@@ -78,27 +78,15 @@ __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, 
 
     int cellIndex = cellX + cellY * grid.sizeX + cellZ * grid.sizeX * grid.sizeY;
 
-    // Assert to ensure cellIndex is within valid range
-    assert(cellIndex < (grid.sizeX * grid.sizeY * grid.sizeZ));
-
     __shared__ int s_moleculeIndices[MAX_MOLECULES_PER_CELL];
     __shared__ int s_count;
 
     if (threadIdx.x == 0) {
         s_count = cells[cellIndex].count;
-        // Log the count of molecules in the current cell
-        //printf("Cell (%d, %d, %d) [Index %d] has %d molecules.\n", cellX, cellY, cellZ, cellIndex, s_count);
         for (int i = 0; i < s_count; ++i) {
             s_moleculeIndices[i] = cells[cellIndex].moleculeIndices[i];
-            // Assert to ensure molecule indices are within valid range
-            assert(s_moleculeIndices[i] < num_molecules);
         }
-
-        // Clamp s_count to MAX_MOLECULES_PER_CELL to prevent out-of-bounds access
         s_count = min(s_count, MAX_MOLECULES_PER_CELL);
-        if (s_count < cells[cellIndex].count) {
-            printf("Clamped s_count from %d to %d for cellIndex %d to prevent overflow.\n", cells[cellIndex].count, s_count, cellIndex);
-        }
     }
     __syncthreads();
 
@@ -110,18 +98,13 @@ __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, 
                 int neighborY = cellY + offsetY;
                 int neighborZ = cellZ + offsetZ;
 
-                // Check bounds
+                // Check bounds without wrapping
                 if (neighborX >= 0 && neighborX < grid.sizeX &&
                     neighborY >= 0 && neighborY < grid.sizeY &&
                     neighborZ >= 0 && neighborZ < grid.sizeZ) {
                     int neighborIndex = neighborX + neighborY * grid.sizeX + neighborZ * grid.sizeX * grid.sizeY;
 
-                    // Assert to ensure neighborIndex is within valid range
-                    assert(neighborIndex < (grid.sizeX * grid.sizeY * grid.sizeZ));
-
                     int neighborCount = cells[neighborIndex].count;
-                    // Log the neighbor cell details
-                    //printf("Processing Neighbor Cell (%d, %d, %d) [Index %d] with %d molecules.\n", neighborX, neighborY, neighborZ, neighborIndex, neighborCount);
 
                     for (int i = threadIdx.x; i < s_count; i += blockDim.x) {
                         int molIdx = s_moleculeIndices[i];
@@ -131,23 +114,12 @@ __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, 
                         for (int j = 0; j < neighborCount; ++j) {
                             int molJIdx = cells[neighborIndex].moleculeIndices[j];
                             if (molIdx != molJIdx) {
-                                // Assert to ensure molecule indices are within valid range
-                                assert(molIdx < num_molecules && molJIdx < num_molecules);
-
                                 Molecule& mol_j = molecules[molJIdx];
 
                                 float3 r;
                                 r.x = mol_j.centerOfMass.x - mol_i.centerOfMass.x;
                                 r.y = mol_j.centerOfMass.y - mol_i.centerOfMass.y;
                                 r.z = mol_j.centerOfMass.z - mol_i.centerOfMass.z;
-
-                                // Apply periodic boundary conditions
-                                if (r.x > space.width / 2) r.x -= space.width;
-                                if (r.x < -space.width / 2) r.x += space.width;
-                                if (r.y > space.height / 2) r.y -= space.height;
-                                if (r.y < -space.height / 2) r.y += space.height;
-                                if (r.z > space.depth / 2) r.z -= space.depth;
-                                if (r.z < -space.depth / 2) r.z += space.depth;
 
                                 float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
 
@@ -326,7 +298,6 @@ __global__ void calculateForces(Molecule* molecules, int num_molecules, float3* 
 __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_molecules) {
-
         // Log info for molecule 500
         if (idx == 500) {
             printf("Molecule 500: Position (%f, %f, %f), Velocity (%f, %f, %f), Force (%f, %f, %f)\n",
@@ -344,20 +315,29 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* force
         float ay = force.y / totalMass;
         float az = force.z / totalMass;
 
-        // Update velocity directly
+        // Update velocity
         mol.vx += ax * dt;
         mol.vy += ay * dt;
         mol.vz += az * dt;
 
-        // Update position directly
+        // Update position
         mol.centerOfMass.x += mol.vx * dt;
         mol.centerOfMass.y += mol.vy * dt;
         mol.centerOfMass.z += mol.vz * dt;
 
-        // Apply periodic boundary conditions
-        mol.centerOfMass.x = fmodf(mol.centerOfMass.x + space.width, space.width);
-        mol.centerOfMass.y = fmodf(mol.centerOfMass.y + space.height, space.height);
-        mol.centerOfMass.z = fmodf(mol.centerOfMass.z + space.depth, space.depth);
+        // Bounce off walls
+        if (mol.centerOfMass.x < 0 || mol.centerOfMass.x > space.width) {
+            mol.vx = -mol.vx;
+            mol.centerOfMass.x = fmaxf(0.0f, fminf(mol.centerOfMass.x, space.width));
+        }
+        if (mol.centerOfMass.y < 0 || mol.centerOfMass.y > space.height) {
+            mol.vy = -mol.vy;
+            mol.centerOfMass.y = fmaxf(0.0f, fminf(mol.centerOfMass.y, space.height));
+        }
+        if (mol.centerOfMass.z < 0 || mol.centerOfMass.z > space.depth) {
+            mol.vz = -mol.vz;
+            mol.centerOfMass.z = fmaxf(0.0f, fminf(mol.centerOfMass.z, space.depth));
+        }
 
         // Log info for molecule 500
         if (idx == 500) {

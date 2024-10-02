@@ -1,5 +1,5 @@
 # Simulation space dimensions (width height depth)
-100 100 100
+25 25 25
 # Number of molecule types
 33
 # Molecule counts
@@ -21,7 +21,7 @@ NAD_Plus: 10
 NADH: 10
 Proton: 10
 Inorganic_Phosphate: 10
-Water: 1
+Water: 0
 # Enzymes
 Hexokinase: 100
 Glucose_6_Phosphate_Isomerase: 10

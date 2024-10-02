@@ -1,0 +1,1 @@
+C:\Git\TestCUDA\CUDAGlycolysis\x64\Release\CUDAGlycolysis.exe
