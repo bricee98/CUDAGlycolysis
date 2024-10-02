@@ -350,8 +350,9 @@ void initTextRendering() {
         fprintf(stderr, "Font file not found or other error\n");
     }
 
-    // Increase the font size (was 48, now 64)
+    // Increase the font size (originally 48)
     FT_Set_Pixel_Sizes(face, 0, 64);
+
 
     glGenVertexArrays(1, &textVAO);
     glGenBuffers(1, &textVBO);
