@@ -4,8 +4,8 @@
 #include "SimulationSpace.h"
 
 // Constants for the spatial grid
-#define CELL_SIZE 2.0f  // Adjust based on interaction cutoff
-#define MAX_MOLECULES_PER_CELL 100  // Adjust as needed
+#define CELL_SIZE 10.0f  // Adjust based on interaction cutoff
+#define MAX_MOLECULES_PER_CELL 1000  // Adjust as needed
 
 struct Grid {
     int sizeX;

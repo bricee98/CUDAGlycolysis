@@ -11,7 +11,6 @@
 #include <time.h>
 #include "SimulationSpace.h"
 #include "Molecule.cuh"
-#include "Atom.cuh"
 #include "kernel.cuh"
 #include "visualization.h"
 #include "Cell.cuh"
@@ -301,10 +300,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
     }
 
-    printf("MAX_MOLECULES * sizeof(Molecule): %zu\n", MAX_MOLECULES * sizeof(Molecule));
-    printf("Size of Molecule: %zu bytes\n", sizeof(Molecule));
-    printf("Size of Atom: %zu bytes\n", sizeof(Atom));
-    printf("Number of Atoms per Molecule: %d\n", MAX_ATOMS_PER_MOLECULE);
 
     // available memory
     size_t availableMemory;
@@ -347,19 +342,13 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     // Reset forces
     cudaMemset(dev_forces, 0, space->num_molecules * sizeof(float3));
     printf("Reset forces\n");
-    // Compute forces using cells
-    dim3 gridCompute(grid.sizeX, grid.sizeY, grid.sizeZ);
-    computeForcesUsingCells<<<gridCompute, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_cells, dev_forces, *space, grid);
-    // Synchronize to ensure kernel execution completion and flush printf output
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching computeForcesUsingCells kernel!\n", cudaStatus);
-        return cudaStatus;
-    }
-    printf("Computed forces using cells\n");
+    // Adjust the timestep for microsecond timescales
+    float dt = 1e-6f; // Timestep of 1 microsecond
 
-    // Apply forces and update positions
-    applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_forces, space->num_molecules, *space, 0.01f);
+    // Call applyForcesAndUpdatePositions with the new dt
+    applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(
+        dev_molecules, space->num_molecules, *space, dt, dev_states);
+
     // Synchronize to ensure kernel execution completion and flush printf output
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {

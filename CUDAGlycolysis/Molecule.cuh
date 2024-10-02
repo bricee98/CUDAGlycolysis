@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include "Atom.cuh"
 
 #define MAX_ATOMS_PER_MOLECULE 100
 
@@ -45,27 +44,17 @@ enum MoleculeType {
     FRUCTOSE_2_6_BISPHOSPHATE
 };
 
-// Enumeration for molecule representation
-enum MoleculeRepresentation {
-    ATOMIC = 0,
-    COARSE_GRAINED = 1
-};
-
 class Molecule {
 public:
     // Member variables
     float3 centerOfMass;
     float vx, vy, vz;
     MoleculeType type;
-    int atomCount;
     bool markedForDeletion;
     MoleculeType creationFlag;
-    MoleculeRepresentation representation;
-     // For position
-    float radius;         // For coarse-grained molecules
-    float mass;           // For coarse-grained molecules
-    Atom atoms[MAX_ATOMS_PER_MOLECULE];
-    float totalCharge;
+    float radius;         // For all molecules
+    float mass;           // For all molecules
+    float totalCharge;    // For all molecules
 
     // Constructors
     __host__ __device__ Molecule();
@@ -104,8 +93,7 @@ public:
     static __host__ Molecule createFructose26Bisphosphate();
 
     // Utility functions
-    __host__ __device__ float getTotalMass() const;
-    __host__ __device__ void initializeAtoms();
+    __host__ __device__ float getTotalMass() const { return mass; }
     
     // Method to get the molecule's type
     __host__ MoleculeType getType() const {
@@ -121,6 +109,6 @@ public:
 
 private:
     // Helper functions
-    void initializeAtomPositions(); // Host-only function
-    void calculateBornRadii();      // Host-only function
+    // void initializeAtomPositions(); // Host-only function
+    // void calculateBornRadii();      // Host-only function
 };

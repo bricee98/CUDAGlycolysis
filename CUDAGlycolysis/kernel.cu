@@ -13,7 +13,6 @@ int h_GRID_SIZE_Z = 10;
 #include "kernel.cuh"
 #include <curand_kernel.h>
 #include "Molecule.cuh"
-#include "Atom.cuh"
 #include "SimulationSpace.h"
 #include "kernel.cuh"
 #include "Cell.cuh"
@@ -21,22 +20,26 @@ int h_GRID_SIZE_Z = 10;
 #include <cstdio>
 #include <assert.h>
 // Constants for interaction radius and reaction probabilities
-#define INTERACTION_RADIUS 2.0f
+#define INTERACTION_RADIUS 5.0f  // nm
 #define INTERACTION_RADIUS_SQ (INTERACTION_RADIUS * INTERACTION_RADIUS)
-#define BASE_REACTION_PROBABILITY 0.00f
+#define BASE_REACTION_PROBABILITY 1e-6f  // Adjusted for microsecond timescale
 #define ENZYME_CATALYSIS_FACTOR 100.0f
-#define NUM_REACTION_TYPES 10 // Update this as you add more reaction types
+#define NUM_REACTION_TYPES 10
 
 // Constants for force calculations
-#define COULOMB_CONSTANT 138.935456f  // (kJ*nm)/(mol*e^2)
-#define CUTOFF_DISTANCE 2.0f          // nm
+#define COULOMB_CONSTANT 138.935458f  // (kJ*nm)/(mol*e^2)
+#define CUTOFF_DISTANCE 10.0f  // nm
 #define CUTOFF_DISTANCE_SQ (CUTOFF_DISTANCE * CUTOFF_DISTANCE)
-#define EPSILON_0 8.854187817e-12f    // Vacuum permittivity
-#define K_BOLTZMANN 0.0083144621f     // Boltzmann constant in kJ/(mol*K)
-#define TEMPERATURE 310.15f           // Temperature in Kelvin (37°C)
-#define SOLVENT_DIELECTRIC 78.5f      // Dielectric constant of water at 37°C
+#define EPSILON_0 8.854187817e-12f  // F/m (Vacuum permittivity)
+#define K_BOLTZMANN 0.0083144621f  // kJ/(mol*K)
+#define TEMPERATURE 310.15f  // K (37°C)
+#define SOLVENT_DIELECTRIC 78.5f  // Dimensionless (for water at 37°C)
 
-#define CELL_SIZE 2.0f  // Adjust this value based on your simulation requirements
+#define CELL_SIZE 10.0f  // nm
+
+#define VISCOSITY 6.91e-4f  // kJ*s/(nm^3*mol) (viscosity of water at 37°C)
+
+#define REPULSION_COEFFICIENT 1.0f  // Adjust as needed
 
 // Add the new kernels and functions
 
@@ -122,12 +125,17 @@ __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, 
                                 r.z = mol_j.centerOfMass.z - mol_i.centerOfMass.z;
 
                                 float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
+                                float minDist = mol_i.radius + mol_j.radius;
 
-                                if (distSq < CUTOFF_DISTANCE_SQ && distSq > 0.0f) {
-                                    float3 pairForce = calculatePairwiseForce(mol_i, mol_j, r, distSq);
-                                    totalForce.x += pairForce.x;
-                                    totalForce.y += pairForce.y;
-                                    totalForce.z += pairForce.z;
+                                if (distSq < minDist * minDist && distSq > 0.0f) {
+                                    float dist = sqrtf(distSq);
+                                    float overlap = minDist - dist;
+                                    // Simple linear repulsion
+                                    float forceMag = overlap * REPULSION_COEFFICIENT; // Define repulsionCoefficient appropriately
+                                    float invDist = 1.0f / dist;
+                                    totalForce.x += r.x * forceMag * invDist;
+                                    totalForce.y += r.y * forceMag * invDist;
+                                    totalForce.z += r.z * forceMag * invDist;
                                 }
                             }
                         }
@@ -141,36 +149,6 @@ __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, 
             }
         }
     }
-}
-
-// Implement the calculatePairwiseForce function
-__device__ float3 calculatePairwiseForce(const Molecule& mol1, const Molecule& mol2, float3 r, float distSq) {
-    float3 force = make_float3(0.0f, 0.0f, 0.0f);
-    float dist = sqrtf(distSq);
-    float invDist = 1.0f / dist;
-
-    // Parameters (adjust as needed)
-    float epsilon = 0.1f;
-    float sigma = 0.3f;
-
-    // Lennard-Jones potential
-    float sigmaOverDist = sigma * invDist;
-    float sigmaOverDist6 = powf(sigmaOverDist, 6);
-    float sigmaOverDist12 = sigmaOverDist6 * sigmaOverDist6;
-
-    float forceLJ = 24.0f * epsilon * (2.0f * sigmaOverDist12 - sigmaOverDist6) * invDist * invDist;
-
-    // Coulomb force
-    float chargeProduct = mol1.totalCharge * mol2.totalCharge;
-    float forceCoulomb = COULOMB_CONSTANT * chargeProduct * invDist * invDist;
-
-    float totalForceMultiplier = forceLJ + forceCoulomb;
-
-    force.x = r.x * totalForceMultiplier * invDist;
-    force.y = r.y * totalForceMultiplier * invDist;
-    force.z = r.z * totalForceMultiplier * invDist;
-
-    return force;
 }
 
 // Helper function to calculate distance squared between two molecules
@@ -222,9 +200,6 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
 
     if (idx >= *num_molecules) return;
 
-    // Add a print statement to confirm execution
-    // printf("Thread %d is processing molecule %d of type %d\n", idx, idx, molecules[idx].type);
-
     Molecule& mol1 = molecules[idx];
     curandState localState = states[idx];
 
@@ -232,27 +207,169 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
         Molecule& mol2 = molecules[j];
 
         if (distanceSquared(mol1, mol2) <= INTERACTION_RADIUS_SQ) {
-            switch (mol1.type) {
-                case GLUCOSE:
-                    if (mol2.type == ATP) {
-                        bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, HEXOKINASE);
-                        if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                            int delIdx = atomicAdd(numDeletions, 2);
-                            deletionBuffer[delIdx] = idx;
-                            deletionBuffer[delIdx + 1] = j;
+            // Existing reaction: Glucose + ATP -> Glucose-6-Phosphate + ADP (Hexokinase)
+            if ((mol1.type == GLUCOSE && mol2.type == ATP) || (mol2.type == GLUCOSE && mol1.type == ATP)) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, HEXOKINASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 2);
+                    deletionBuffer[delIdx] = idx;
+                    deletionBuffer[delIdx + 1] = j;
 
-                            int createIdx = atomicAdd(numCreations, 2);
-                            creationBuffer[createIdx] = {GLUCOSE_6_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                            creationBuffer[createIdx + 1] = {ADP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {GLUCOSE_6_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {ADP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
 
-                            atomicAdd(&reactionCounts[0], 1);
-                            return;
-                        }
-                    }
-                    break;
+                    atomicAdd(&reactionCounts[0], 1);
+                    return;
+                }
+            }
 
-                default:
-                    break;
+            // Glucose-6-Phosphate -> Fructose-6-Phosphate (Glucose-6-Phosphate Isomerase)
+            else if (mol1.type == GLUCOSE_6_PHOSPHATE || mol2.type == GLUCOSE_6_PHOSPHATE) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, GLUCOSE_6_PHOSPHATE_ISOMERASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 1);
+                    deletionBuffer[delIdx] = (mol1.type == GLUCOSE_6_PHOSPHATE) ? idx : j;
+
+                    int createIdx = atomicAdd(numCreations, 1);
+                    creationBuffer[createIdx] = {FRUCTOSE_6_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[1], 1);
+                    return;
+                }
+            }
+
+            // Fructose-6-Phosphate + ATP -> Fructose-1,6-Bisphosphate + ADP (Phosphofructokinase-1)
+            else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == ATP) || (mol2.type == FRUCTOSE_6_PHOSPHATE && mol1.type == ATP)) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOFRUCTOKINASE_1);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 2);
+                    deletionBuffer[delIdx] = idx;
+                    deletionBuffer[delIdx + 1] = j;
+
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {FRUCTOSE_1_6_BISPHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {ADP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[2], 1);
+                    return;
+                }
+            }
+
+            // Fructose-1,6-Bisphosphate -> Dihydroxyacetone Phosphate + Glyceraldehyde-3-Phosphate (Aldolase)
+            else if (mol1.type == FRUCTOSE_1_6_BISPHOSPHATE || mol2.type == FRUCTOSE_1_6_BISPHOSPHATE) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, ALDOLASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 1);
+                    deletionBuffer[delIdx] = (mol1.type == FRUCTOSE_1_6_BISPHOSPHATE) ? idx : j;
+
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {DIHYDROXYACETONE_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {GLYCERALDEHYDE_3_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[3], 1);
+                    return;
+                }
+            }
+
+            // Dihydroxyacetone Phosphate -> Glyceraldehyde-3-Phosphate (Triosephosphate Isomerase)
+            else if (mol1.type == DIHYDROXYACETONE_PHOSPHATE || mol2.type == DIHYDROXYACETONE_PHOSPHATE) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, TRIOSEPHOSPHATE_ISOMERASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 1);
+                    deletionBuffer[delIdx] = (mol1.type == DIHYDROXYACETONE_PHOSPHATE) ? idx : j;
+
+                    int createIdx = atomicAdd(numCreations, 1);
+                    creationBuffer[createIdx] = {GLYCERALDEHYDE_3_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[4], 1);
+                    return;
+                }
+            }
+
+            // Glyceraldehyde-3-Phosphate + NAD+ + Pi -> 1,3-Bisphosphoglycerate + NADH + H+ (Glyceraldehyde-3-Phosphate Dehydrogenase)
+            else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == NAD_PLUS) || (mol2.type == GLYCERALDEHYDE_3_PHOSPHATE && mol1.type == NAD_PLUS)) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE);
+                bool phosphatePresent = checkEnzymePresence(molecules, *num_molecules, mol1, INORGANIC_PHOSPHATE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent) && phosphatePresent) {
+                    int delIdx = atomicAdd(numDeletions, 3);
+                    deletionBuffer[delIdx] = idx;
+                    deletionBuffer[delIdx + 1] = j;
+                    // Find and delete an inorganic phosphate molecule
+
+                    int createIdx = atomicAdd(numCreations, 3);
+                    creationBuffer[createIdx] = {_1_3_BISPHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {NADH, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+                    creationBuffer[createIdx + 2] = {PROTON, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[5], 1);
+                    return;
+                }
+            }
+
+            // 1,3-Bisphosphoglycerate + ADP -> 3-Phosphoglycerate + ATP (Phosphoglycerate Kinase)
+            else if ((mol1.type == _1_3_BISPHOSPHOGLYCERATE && mol2.type == ADP) || (mol2.type == _1_3_BISPHOSPHOGLYCERATE && mol1.type == ADP)) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOGLYCERATE_KINASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 2);
+                    deletionBuffer[delIdx] = idx;
+                    deletionBuffer[delIdx + 1] = j;
+
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {_3_PHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {ATP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[6], 1);
+                    return;
+                }
+            }
+
+            // 3-Phosphoglycerate -> 2-Phosphoglycerate (Phosphoglycerate Mutase)
+            else if (mol1.type == _3_PHOSPHOGLYCERATE || mol2.type == _3_PHOSPHOGLYCERATE) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOGLYCERATE_MUTASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 1);
+                    deletionBuffer[delIdx] = (mol1.type == _3_PHOSPHOGLYCERATE) ? idx : j;
+
+                    int createIdx = atomicAdd(numCreations, 1);
+                    creationBuffer[createIdx] = {_2_PHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[7], 1);
+                    return;
+                }
+            }
+
+            // 2-Phosphoglycerate -> Phosphoenolpyruvate + H2O (Enolase)
+            else if (mol1.type == _2_PHOSPHOGLYCERATE || mol2.type == _2_PHOSPHOGLYCERATE) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, ENOLASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 1);
+                    deletionBuffer[delIdx] = (mol1.type == _2_PHOSPHOGLYCERATE) ? idx : j;
+
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {PHOSPHOENOLPYRUVATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {WATER, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[8], 1);
+                    return;
+                }
+            }
+
+            // Phosphoenolpyruvate + ADP -> Pyruvate + ATP (Pyruvate Kinase)
+            else if ((mol1.type == PHOSPHOENOLPYRUVATE && mol2.type == ADP) || (mol2.type == PHOSPHOENOLPYRUVATE && mol1.type == ADP)) {
+                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PYRUVATE_KINASE);
+                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
+                    int delIdx = atomicAdd(numDeletions, 2);
+                    deletionBuffer[delIdx] = idx;
+                    deletionBuffer[delIdx + 1] = j;
+
+                    int createIdx = atomicAdd(numCreations, 2);
+                    creationBuffer[createIdx] = {PYRUVATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
+                    creationBuffer[createIdx + 1] = {ATP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+
+                    atomicAdd(&reactionCounts[9], 1);
+                    return;
+                }
             }
         }
     }
@@ -260,71 +377,32 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
     states[idx] = localState;
 }
 
-// Calculate pairwise force between two molecule
-
-// Kernel to calculate forces
-__global__ void calculateForces(Molecule* molecules, int num_molecules, float3* forces) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_molecules) {
-        float3 totalForce = make_float3(0.0f, 0.0f, 0.0f);
-
-        Molecule& mol_i = molecules[idx];
-
-        for (int j = 0; j < num_molecules; ++j) {
-            if (idx != j) {
-                Molecule& mol_j = molecules[j];
-
-                float3 r;
-                r.x = mol_j.centerOfMass.x - mol_i.centerOfMass.x;
-                r.y = mol_j.centerOfMass.y - mol_i.centerOfMass.y;
-                r.z = mol_j.centerOfMass.z - mol_i.centerOfMass.z;
-
-                float distSq = r.x * r.x + r.y * r.y + r.z * r.z;
-
-                if (distSq < CUTOFF_DISTANCE_SQ && distSq > 0.0f) {
-                    float3 pairForce = calculatePairwiseForce(mol_i, mol_j, r, distSq);
-                    totalForce.x += pairForce.x;
-                    totalForce.y += pairForce.y;
-                    totalForce.z += pairForce.z;
-                }
-            }
-        }
-
-        forces[idx] = totalForce;
-    }
-}
-
 // Kernel to apply forces and update positions
-__global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* forces, int num_molecules, SimulationSpace space, float dt) {
+__global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, float dt, curandState* randStates) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_molecules) {
-        // Log info for molecule 500
-        if (idx == 500) {
-            printf("Molecule 500: Position (%f, %f, %f), Velocity (%f, %f, %f), Force (%f, %f, %f)\n",
-                   molecules[500].centerOfMass.x, molecules[500].centerOfMass.y, molecules[500].centerOfMass.z,
-                   molecules[500].vx, molecules[500].vy, molecules[500].vz,
-                   forces[500].x, forces[500].y, forces[500].z);
-        }
-
         Molecule& mol = molecules[idx];
-        float totalMass = mol.getTotalMass();
-        float3 force = forces[idx];
 
-        // Apply acceleration
-        float ax = force.x / totalMass;
-        float ay = force.y / totalMass;
-        float az = force.z / totalMass;
+        // Calculate diffusion coefficient (D)
+        float gamma = 6.0f * 3.14159265358979323846f * mol.radius * VISCOSITY;
+        float D = K_BOLTZMANN * TEMPERATURE / gamma; // nm^2/s
+        D *= 1e-6f; // Convert D to nm^2/μs
 
-        // Update velocity
-        mol.vx += ax * dt;
-        mol.vy += ay * dt;
-        mol.vz += az * dt;
+        // Random displacement due to Brownian motion
+        curandState localState = randStates[idx];
+        float sqrtTerm = sqrtf(2.0f * D * dt);
+
+        float3 randomDisplacement;
+        randomDisplacement.x = curand_normal(&localState) * sqrtTerm;
+        randomDisplacement.y = curand_normal(&localState) * sqrtTerm;
+        randomDisplacement.z = curand_normal(&localState) * sqrtTerm;
 
         // Update position
-        mol.centerOfMass.x += mol.vx * dt;
-        mol.centerOfMass.y += mol.vy * dt;
-        mol.centerOfMass.z += mol.vz * dt;
+        mol.centerOfMass.x += randomDisplacement.x;
+        mol.centerOfMass.y += randomDisplacement.y;
+        mol.centerOfMass.z += randomDisplacement.z;
 
+        // Handle boundary conditions
         // Bounce off walls
         if (mol.centerOfMass.x < 0 || mol.centerOfMass.x > space.width) {
             mol.vx = -mol.vx;
@@ -339,11 +417,7 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, float3* force
             mol.centerOfMass.z = fmaxf(0.0f, fminf(mol.centerOfMass.z, space.depth));
         }
 
-        // Log info for molecule 500
-        if (idx == 500) {
-            printf("New Molecule 500: Position (%f, %f, %f), Velocity (%f, %f, %f)\n",
-                   mol.centerOfMass.x, mol.centerOfMass.y, mol.centerOfMass.z,
-                   mol.vx, mol.vy, mol.vz);
-        }
+        // Update the random state
+        randStates[idx] = localState;
     }
 }
