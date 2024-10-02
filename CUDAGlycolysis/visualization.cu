@@ -1,5 +1,4 @@
 #include <GL/glew.h>
-#include <GL/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -68,6 +67,36 @@ const char* fragmentShaderSource = R"(
     }
 )";
 
+// Add these shader source codes at the top of the file, after other shader sources
+const char* textVertexShaderSource = R"(
+    #version 330 core
+    layout (location = 0) in vec4 vertex; // <vec2 pos, vec2 tex>
+    out vec2 TexCoords;
+
+    uniform mat4 projection;
+
+    void main()
+    {
+        gl_Position = projection * vec4(vertex.xy, 0.0, 1.0);
+        TexCoords = vertex.zw;
+    }
+)";
+
+const char* textFragmentShaderSource = R"(
+    #version 330 core
+    in vec2 TexCoords;
+    out vec4 color;
+
+    uniform sampler2D text;
+    uniform vec3 textColor;
+
+    void main()
+    {    
+        vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);
+        color = vec4(textColor, 1.0) * sampled;
+    }
+)";
+
 // Global variables for simulation control
 extern bool isPaused;
 
@@ -76,6 +105,20 @@ FT_Library ft;
 FT_Face face;
 GLuint textVAO, textVBO;
 GLuint textShaderProgram;
+
+// Include necessary headers
+#include <map>
+
+// Define a structure to hold information about each character
+struct Character {
+    GLuint TextureID;   // ID handle of the glyph texture
+    glm::ivec2 Size;    // Size of glyph
+    glm::ivec2 Bearing; // Offset from baseline to left/top of glyph
+    GLuint Advance;     // Offset to advance to next glyph
+};
+
+// A map to store glyphs for quick access
+std::map<GLchar, Character> Characters;
 
 // Function to handle key input
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -123,21 +166,87 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
 // Define getMoleculeColor and getMoleculeSize before they're used
 glm::vec3 getMoleculeColor(MoleculeType type) {
     switch (type) {
+        // Substrates and products
         case GLUCOSE: return glm::vec3(1.0f, 0.0f, 0.0f);  // Red
         case ATP: return glm::vec3(0.0f, 1.0f, 0.0f);      // Green
         case ADP: return glm::vec3(0.0f, 0.0f, 1.0f);      // Blue
-        // Add more cases for other molecule types
-        default: return glm::vec3(0.5f, 0.5f, 0.5f);       // Gray for unknown types
+        case GLUCOSE_6_PHOSPHATE: return glm::vec3(1.0f, 0.5f, 0.0f);  // Orange
+        case FRUCTOSE_6_PHOSPHATE: return glm::vec3(1.0f, 1.0f, 0.0f);  // Yellow
+        case FRUCTOSE_1_6_BISPHOSPHATE: return glm::vec3(0.5f, 1.0f, 0.0f);  // Lime
+        case DIHYDROXYACETONE_PHOSPHATE: return glm::vec3(0.0f, 1.0f, 0.5f);  // Spring Green
+        case GLYCERALDEHYDE_3_PHOSPHATE: return glm::vec3(0.0f, 1.0f, 1.0f);  // Cyan
+        case _1_3_BISPHOSPHOGLYCERATE: return glm::vec3(0.5f, 0.0f, 1.0f);  // Purple
+        case _3_PHOSPHOGLYCERATE: return glm::vec3(1.0f, 0.0f, 1.0f);  // Magenta
+        case _2_PHOSPHOGLYCERATE: return glm::vec3(1.0f, 0.5f, 0.5f);  // Pink
+        case PHOSPHOENOLPYRUVATE: return glm::vec3(0.5f, 0.5f, 1.0f);  // Light Blue
+        case PYRUVATE: return glm::vec3(0.5f, 0.25f, 0.0f);  // Brown
+        case NAD_PLUS: return glm::vec3(0.75f, 0.75f, 0.75f);  // Light Gray
+        case NADH: return glm::vec3(0.25f, 0.25f, 0.25f);  // Dark Gray
+        case PROTON: return glm::vec3(1.0f, 1.0f, 1.0f);  // White
+        case INORGANIC_PHOSPHATE: return glm::vec3(0.5f, 0.5f, 0.5f);  // Gray
+        case WATER: return glm::vec3(0.0f, 0.5f, 1.0f);  // Light Blue
+
+        // Enzymes
+        case HEXOKINASE: return glm::vec3(0.8f, 0.2f, 0.2f);  // Dark Red
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE: return glm::vec3(0.2f, 0.8f, 0.2f);  // Dark Green
+        case PHOSPHOFRUCTOKINASE_1: return glm::vec3(0.2f, 0.2f, 0.8f);  // Dark Blue
+        case ALDOLASE: return glm::vec3(0.8f, 0.8f, 0.2f);  // Dark Yellow
+        case TRIOSEPHOSPHATE_ISOMERASE: return glm::vec3(0.8f, 0.2f, 0.8f);  // Dark Magenta
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE: return glm::vec3(0.2f, 0.8f, 0.8f);  // Dark Cyan
+        case PHOSPHOGLYCERATE_KINASE: return glm::vec3(0.6f, 0.4f, 0.2f);  // Dark Orange
+        case PHOSPHOGLYCERATE_MUTASE: return glm::vec3(0.4f, 0.6f, 0.2f);  // Olive
+        case ENOLASE: return glm::vec3(0.2f, 0.4f, 0.6f);  // Steel Blue
+        case PYRUVATE_KINASE: return glm::vec3(0.6f, 0.2f, 0.4f);  // Maroon
+
+        // Regulatory molecules
+        case AMP: return glm::vec3(0.9f, 0.9f, 0.5f);  // Light Yellow
+        case CITRATE: return glm::vec3(0.5f, 0.9f, 0.9f);  // Light Cyan
+        case FRUCTOSE_2_6_BISPHOSPHATE: return glm::vec3(0.9f, 0.5f, 0.9f);  // Light Magenta
+
+        default: return glm::vec3(0.5f, 0.5f, 0.5f);  // Gray for unknown types
     }
 }
 
 float getMoleculeSize(MoleculeType type) {
     switch (type) {
+        // Substrates and products
         case GLUCOSE: return 1.0f;
         case ATP: return 1.2f;
         case ADP: return 1.1f;
-        // Add more cases for other molecule types
-        default: return 0.8f;
+        case GLUCOSE_6_PHOSPHATE: return 1.1f;
+        case FRUCTOSE_6_PHOSPHATE: return 1.1f;
+        case FRUCTOSE_1_6_BISPHOSPHATE: return 1.2f;
+        case DIHYDROXYACETONE_PHOSPHATE: return 0.9f;
+        case GLYCERALDEHYDE_3_PHOSPHATE: return 0.9f;
+        case _1_3_BISPHOSPHOGLYCERATE: return 1.0f;
+        case _3_PHOSPHOGLYCERATE: return 0.9f;
+        case _2_PHOSPHOGLYCERATE: return 0.9f;
+        case PHOSPHOENOLPYRUVATE: return 0.9f;
+        case PYRUVATE: return 0.8f;
+        case NAD_PLUS: return 1.1f;
+        case NADH: return 1.1f;
+        case PROTON: return 0.3f;
+        case INORGANIC_PHOSPHATE: return 0.7f;
+        case WATER: return 0.5f;
+
+        // Enzymes (generally larger than substrates and products)
+        case HEXOKINASE: return 2.0f;
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE: return 1.9f;
+        case PHOSPHOFRUCTOKINASE_1: return 2.1f;
+        case ALDOLASE: return 2.0f;
+        case TRIOSEPHOSPHATE_ISOMERASE: return 1.8f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE: return 2.2f;
+        case PHOSPHOGLYCERATE_KINASE: return 2.0f;
+        case PHOSPHOGLYCERATE_MUTASE: return 1.9f;
+        case ENOLASE: return 2.0f;
+        case PYRUVATE_KINASE: return 2.1f;
+
+        // Regulatory molecules
+        case AMP: return 0.9f;
+        case CITRATE: return 1.0f;
+        case FRUCTOSE_2_6_BISPHOSPHATE: return 1.1f;
+
+        default: return 0.8f;  // Default size for unknown types
     }
 }
 
@@ -148,7 +257,7 @@ void initTextRendering() {
     }
 
     // Update the font path to a more common location or use a relative path
-    const char* fontPath = "C:/Windows/Fonts/arial.ttf";  // For Windows
+    const char* fontPath = "Roboto-Thin.ttf";  // For Windows
     // const char* fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";  // For Linux
     // const char* fontPath = "/System/Library/Fonts/Helvetica.ttc";  // For macOS
 
@@ -172,10 +281,96 @@ void initTextRendering() {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
-    printf("Text rendering initialized\n");
+    // Load first 128 ASCII characters
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // Disable byte-alignment restriction
+
+    for (GLubyte c = 0; c < 128; c++) {
+        // Load character glyph
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
+            fprintf(stderr, "ERROR::FREETYPE: Failed to load Glyph %c\n", c);
+            continue;
+        }
+        // Generate texture
+        GLuint texture;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_RED,
+            face->glyph->bitmap.width,
+            face->glyph->bitmap.rows,
+            0,
+            GL_RED,
+            GL_UNSIGNED_BYTE,
+            face->glyph->bitmap.buffer
+        );
+        // Set texture options
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); // Prevent artifacts
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // Linear filtering
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        // Store character for later use
+        Character character = {
+            texture,
+            glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
+            glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
+            static_cast<GLuint>(face->glyph->advance.x)
+        };
+        Characters.insert(std::pair<GLchar, Character>(c, character));
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Clean up FreeType resources
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
 
     // Create and compile text shader program
-    // ... (implement this part)
+    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &textVertexShaderSource, NULL);
+    glCompileShader(vertexShader);
+
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &textFragmentShaderSource, NULL);
+    glCompileShader(fragmentShader);
+
+    textShaderProgram = glCreateProgram();
+    glAttachShader(textShaderProgram, vertexShader);
+    glAttachShader(textShaderProgram, fragmentShader);
+    glLinkProgram(textShaderProgram);
+
+    // Check for shader compilation and linking errors
+    GLint success;
+    GLchar infoLog[512];
+
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        fprintf(stderr, "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n%s\n", infoLog);
+    }
+
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        fprintf(stderr, "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n%s\n", infoLog);
+    }
+
+    glGetProgramiv(textShaderProgram, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(textShaderProgram, 512, NULL, infoLog);
+        fprintf(stderr, "ERROR::SHADER::PROGRAM::LINKING_FAILED\n%s\n", infoLog);
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    // Set up the projection matrix for text rendering (top-left origin)
+    glm::mat4 textProjection = glm::ortho(0.0f, static_cast<float>(1024), static_cast<float>(768), 0.0f);
+    glUseProgram(textShaderProgram);
+    glUniformMatrix4fv(glGetUniformLocation(textShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(textProjection));
+
+    printf("Text rendering initialized\n");
 }
 
 // Add this function to compile shaders
@@ -256,6 +451,10 @@ void initVisualization() {
     // Enable cursor capture for camera control
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
+    // Enable blending for text rendering
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     // Initialize text rendering
     initTextRendering();
 }
@@ -307,10 +506,8 @@ void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>&
     // Render molecule counts
     renderMoleculeCounts(molecules);
 
-    // Swap front and back buffers
+    // Swap buffers and poll events
     glfwSwapBuffers(window);
-
-    // Poll for and process events
     glfwPollEvents();
 }
 
@@ -320,71 +517,70 @@ void renderMoleculeCounts(const std::vector<Molecule>& molecules) {
         moleculeCounts[molecule.getType()]++;
     }
 
-    int yOffset = 10;
+    float yOffset = 10.0f; // Start from 10 pixels from the top
     for (const auto& pair : moleculeCounts) {
         MoleculeType type = pair.first;
         int count = pair.second;
         std::string text = std::string(getMoleculeTypeName(type)) + ": " + std::to_string(count);
-        renderText(text, 10, yOffset, 0.5f, glm::vec3(1.0f, 1.0f, 1.0f));
-        yOffset += 20;
+        renderText(text, 10.0f, yOffset, 0.5f, glm::vec3(1.0f, 1.0f, 1.0f));
+        yOffset += 30.0f; // Move down for next line (adjust as needed)
     }
 }
 
 void renderText(const std::string &text, float x, float y, float scale, glm::vec3 color) {
+    // Activate corresponding render state
     glUseProgram(textShaderProgram);
     glUniform3f(glGetUniformLocation(textShaderProgram, "textColor"), color.x, color.y, color.z);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(textVAO);
 
-    for (char c : text) {
-        FT_Load_Char(face, c, FT_LOAD_RENDER);
-        
-        GLuint texture;
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            GL_RED,
-            face->glyph->bitmap.width,
-            face->glyph->bitmap.rows,
-            0,
-            GL_RED,
-            GL_UNSIGNED_BYTE,
-            face->glyph->bitmap.buffer
-        );
+    // Disable depth testing and enable blending
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Initialize cursor position
+    float x_cursor = x; // Start from the initial x position
 
-        float xpos = x + face->glyph->bitmap_left * scale;
-        float ypos = y - (face->glyph->bitmap.rows - face->glyph->bitmap_top) * scale;
+    // Iterate over all characters
+    std::string::const_iterator c;
+    for (c = text.begin(); c != text.end(); c++) {
+        Character ch = Characters[*c];
 
-        float w = face->glyph->bitmap.width * scale;
-        float h = face->glyph->bitmap.rows * scale;
+        float xpos = x_cursor + ch.Bearing.x * scale;
+        float ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
 
+        float w = ch.Size.x * scale;
+        float h = ch.Size.y * scale;
+
+        // Update VBO for each character
         float vertices[6][4] = {
-            { xpos,     ypos + h,   0.0f, 0.0f },            
-            { xpos,     ypos,       0.0f, 1.0f },
-            { xpos + w, ypos,       1.0f, 1.0f },
+            { xpos,     ypos + h,   0.0f, 1.0f },
+            { xpos + w, ypos,       1.0f, 0.0f },
+            { xpos,     ypos,       0.0f, 0.0f },
 
-            { xpos,     ypos + h,   0.0f, 0.0f },
-            { xpos + w, ypos,       1.0f, 1.0f },
-            { xpos + w, ypos + h,   1.0f, 0.0f }           
+            { xpos,     ypos + h,   0.0f, 1.0f },
+            { xpos + w, ypos + h,   1.0f, 1.0f },
+            { xpos + w, ypos,       1.0f, 0.0f }
         };
 
+        // Render glyph texture over quad
+        glBindTexture(GL_TEXTURE_2D, ch.TextureID);
+
+        // Update content of VBO memory
         glBindBuffer(GL_ARRAY_BUFFER, textVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+        // Render quad
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        x += (face->glyph->advance.x >> 6) * scale;
-
-        glDeleteTextures(1, &texture);
+        // Advance cursor for the next character
+        x_cursor += (ch.Advance >> 6) * scale; // Bitshift by 6 to convert from 1/64 pixels
     }
+
+    // Re-enable depth testing and disable blending after text rendering
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
 
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
