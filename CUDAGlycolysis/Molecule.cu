@@ -3,17 +3,10 @@
 #include <cstdlib>
 
 __host__ Molecule::Molecule()
-    : type(WATER), vx(0.0f), vy(0.0f), vz(0.0f),
+    : type(WATER),
       markedForDeletion(false), creationFlag(WATER),
       centerOfMass(make_float3(0.0f, 0.0f, 0.0f)), radius(0.0f), mass(0.0f), totalCharge(0.0f) {}
 
-// Helper function to set random initial velocity
-__host__ void setRandomVelocity(Molecule& m) {
-    float maxInitialVelocity = 0.3f;
-    m.vx = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;
-    m.vy = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;
-    m.vz = ((float)rand() / RAND_MAX) * 2.0f * maxInitialVelocity - maxInitialVelocity;
-}
 
 // Helper function to create coarse-grained molecules
 __host__ Molecule createCoarseGrainedMolecule(MoleculeType type, float radius, float mass, float totalCharge) {
@@ -23,7 +16,6 @@ __host__ Molecule createCoarseGrainedMolecule(MoleculeType type, float radius, f
     m.mass = mass;
     m.totalCharge = totalCharge;
     m.centerOfMass = make_float3(0.0f, 0.0f, 0.0f);
-    setRandomVelocity(m);
     return m;
 }
 
@@ -118,7 +110,6 @@ __host__ Molecule createCoarseGrainedEnzyme(MoleculeType type, float radius, flo
     m.radius = radius;
     m.mass = mass;
     m.centerOfMass = make_float3(0.0f, 0.0f, 0.0f);
-    setRandomVelocity(m);
     return m;
 }
 

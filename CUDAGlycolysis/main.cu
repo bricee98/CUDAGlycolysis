@@ -19,7 +19,7 @@
 
 
 // Define constants
-#define MAX_MOLECULES 2000
+#define MAX_MOLECULES 20000
 #define MAX_MOLECULE_TYPES 33
 #define NUM_REACTION_TYPES 10 // Update this as you add more reaction types
 
@@ -44,6 +44,8 @@ extern int h_GRID_SIZE_Z;
 // Define window and isPaused
 GLFWwindow* window;
 bool isPaused = false;
+
+float total_simulated_time = 0.0f;
 
 // Function prototypes
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks);
@@ -430,7 +432,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
 
     // Print the position of molecule 500
     printf("Host Molecule 500: Position (%f, %f, %f)\n", molecules[500].centerOfMass.x, molecules[500].centerOfMass.y, molecules[500].centerOfMass.z);
-    printf("Host Molecule 500: Velocity (%f, %f, %f)\n", molecules[500].vx, molecules[500].vy, molecules[500].vz);
 
     cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n"); return cudaStatus; }
@@ -452,6 +453,10 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for dev_molecules to molecules!\n"); return cudaStatus; }
     printf("Copied updated molecules to host\n");
+
+    // 4. Move the total_simulated_time update before the return statement
+    total_simulated_time += dt;
+
     return cudaStatus;
 }
 
@@ -626,7 +631,7 @@ int main() {
         }
 
         // Render the current state of the simulation
-        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules));
+        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time);
     }
 
     // Cleanup

@@ -1,39 +1,39 @@
 # Simulation space dimensions (width height depth)
-25 25 25
+1000 1000 1000  # Increased simulation space to 1x1x1 micrometers
 # Number of molecule types
 33
 # Molecule counts
 # Substrates and products
-Glucose: 600
-ATP: 10
-ADP: 10
-Glucose_6_Phosphate: 5
-Fructose_6_Phosphate: 5
-Fructose_1_6_Bisphosphate: 5
-Dihydroxyacetone_Phosphate: 5
-Glyceraldehyde_3_Phosphate: 5
-1_3_Bisphosphoglycerate: 5
-3_Phosphoglycerate: 5
-2_Phosphoglycerate: 5
-Phosphoenolpyruvate: 5
-Pyruvate: 5
-NAD_Plus: 10
-NADH: 10
-Proton: 10
-Inorganic_Phosphate: 10
-Water: 0
+Glucose: 1000  # Increased starting glucose molecules
+ATP: 2000      # Increased ATP concentration
+ADP: 100       # Reduced ADP count
+Glucose_6_Phosphate: 0  # Start with zero, will be produced during simulation
+Fructose_6_Phosphate: 0
+Fructose_1_6_Bisphosphate: 0
+Dihydroxyacetone_Phosphate: 0
+Glyceraldehyde_3_Phosphate: 0
+1_3_Bisphosphoglycerate: 0
+3_Phosphoglycerate: 0
+2_Phosphoglycerate: 0
+Phosphoenolpyruvate: 0
+Pyruvate: 0
+NAD_Plus: 1000  # Increased NAD+ molecules
+NADH: 0         # Starts at zero
+Proton: 0       # Starts at zero
+Inorganic_Phosphate: 1000  # Necessary for certain reactions
+Water: 0        # Optional, may not need to model explicitly
 # Enzymes
 Hexokinase: 100
-Glucose_6_Phosphate_Isomerase: 10
-Phosphofructokinase_1: 10
-Aldolase: 10
-Triosephosphate_Isomerase: 10
-Glyceraldehyde_3_Phosphate_Dehydrogenase: 10
-Phosphoglycerate_Kinase: 10
-Phosphoglycerate_Mutase: 10
-Enolase: 10
-Pyruvate_Kinase: 10
+Glucose_6_Phosphate_Isomerase: 50
+Phosphofructokinase_1: 50
+Aldolase: 50
+Triosephosphate_Isomerase: 50
+Glyceraldehyde_3_Phosphate_Dehydrogenase: 50
+Phosphoglycerate_Kinase: 50
+Phosphoglycerate_Mutase: 50
+Enolase: 50
+Pyruvate_Kinase: 50
 # Regulatory molecules
-AMP: 10
-Citrate: 10
-Fructose_2_6_Bisphosphate: 10
+AMP: 100
+Citrate: 100
+Fructose_2_6_Bisphosphate: 100

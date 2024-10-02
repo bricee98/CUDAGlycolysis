@@ -17,7 +17,7 @@ __global__ void assignMoleculesToCells(Molecule* molecules, int num_molecules, C
 
 __global__ void computeForcesUsingCells(Molecule* molecules, int num_molecules, Cell* cells, float3* forces, SimulationSpace space, Grid grid);
 
-__global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, float dt, curandState* randStates);
+__global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, double dt, curandState* randStates);
 
 __global__ void initCurand(unsigned long long seed, curandState *state, int num_molecules);
 

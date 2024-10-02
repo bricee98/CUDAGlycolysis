@@ -12,13 +12,14 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include "visualization.h"
+#include <math.h>
 
 // Remove this line as it's not needed anymore
 // #include "MoleculeType.h"
 
 // Function prototypes
 void initVisualization();
-void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules);
+void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time);
 void cleanupVisualization();
 void initTextRendering();
 glm::vec3 getMoleculeColor(MoleculeType type);
@@ -37,6 +38,7 @@ glm::mat4 projection, view;
 float cameraDistance = 100.0f;
 float cameraRotationX = 0.0f;
 float cameraRotationY = 0.0f;
+const float NANOMETER_TO_WORLD_SCALE = 10.0f;
 
 // Shader source code (we'll implement these later)
 const char* vertexShaderSource = R"(
@@ -106,6 +108,9 @@ FT_Face face;
 GLuint textVAO, textVBO;
 GLuint textShaderProgram;
 
+// 1. Declare textProjection globally with other global variables
+glm::mat4 textProjection;
+
 // Include necessary headers
 #include <map>
 
@@ -156,11 +161,9 @@ void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
 
 // Function to handle mouse scroll for zoom
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    printf("Scroll callback called: %f\n", yoffset);
-    printf("Camera distance: %f\n", cameraDistance);
-    cameraDistance -= yoffset * 5.0f;
-    if (cameraDistance < 10.0f) cameraDistance = 10.0f;
-    if (cameraDistance > 200.0f) cameraDistance = 200.0f;
+    cameraDistance -= yoffset * 5.0f * NANOMETER_TO_WORLD_SCALE;
+    if (cameraDistance < 10.0f * NANOMETER_TO_WORLD_SCALE) cameraDistance = 10.0f * NANOMETER_TO_WORLD_SCALE;
+    if (cameraDistance > 200.0f * NANOMETER_TO_WORLD_SCALE) cameraDistance = 200.0f * NANOMETER_TO_WORLD_SCALE;
 }
 
 // Define getMoleculeColor and getMoleculeSize before they're used
@@ -250,6 +253,12 @@ float getMoleculeSize(MoleculeType type) {
     }
 }
 
+// Update these constants at the top of the file
+const int WINDOW_WIDTH = 1600;
+const int WINDOW_HEIGHT = 900;
+const float TEXT_SCALE = 0.3f;
+const float LINE_HEIGHT = 24.0f;
+
 void initTextRendering() {
     if (FT_Init_FreeType(&ft)) {
         fprintf(stderr, "Could not init FreeType Library\n");
@@ -280,6 +289,11 @@ void initTextRendering() {
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+
+    // 1. Assign the projection matrix using the correct window dimensions
+    textProjection = glm::ortho(0.0f, static_cast<float>(WINDOW_WIDTH), 0.0f, static_cast<float>(WINDOW_HEIGHT));
+    glUseProgram(textShaderProgram);
+    glUniformMatrix4fv(glGetUniformLocation(textShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(textProjection));
 
     // Load first 128 ASCII characters
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // Disable byte-alignment restriction
@@ -365,8 +379,8 @@ void initTextRendering() {
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
-    // Set up the projection matrix for text rendering (top-left origin)
-    glm::mat4 textProjection = glm::ortho(0.0f, static_cast<float>(1024), static_cast<float>(768), 0.0f);
+    // Set up the projection matrix for text rendering
+    textProjection = glm::ortho(0.0f, static_cast<float>(WINDOW_WIDTH), 0.0f, static_cast<float>(WINDOW_HEIGHT));
     glUseProgram(textShaderProgram);
     glUniformMatrix4fv(glGetUniformLocation(textShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(textProjection));
 
@@ -394,6 +408,108 @@ GLuint createShaderProgram(const char* vertexSource, const char* fragmentSource)
     return shaderProgram;
 }
 
+// Global variables for sphere rendering
+GLuint sphereVAO = 0;
+GLuint sphereVBO = 0;
+GLuint sphereEBO = 0;
+unsigned int indexCount;
+
+// Function to generate sphere mesh
+void generateSphere(float radius, unsigned int sectorCount, unsigned int stackCount) {
+    std::vector<float> vertices;
+    std::vector<unsigned int> indices;
+
+    float x, y, z, xy;                              // vertex position
+    float nx, ny, nz, lengthInv = 1.0f / radius;    // vertex normal
+    float s, t;                                     // vertex texCoord
+
+    float sectorStep = 2 * 3.14159265359 / sectorCount;
+    float stackStep = 3.14159265359 / stackCount;
+    float sectorAngle, stackAngle;
+
+    for(unsigned int i = 0; i <= stackCount; ++i)
+    {
+        stackAngle = 3.14159265359 / 2 - i * stackStep;        // from pi/2 to -pi/2
+        xy = radius * cosf(stackAngle);             // r * cos(u)
+        z = radius * sinf(stackAngle);              // r * sin(u)
+
+        // add (sectorCount+1) vertices per stack
+        for(unsigned int j = 0; j <= sectorCount; ++j)
+        {
+            sectorAngle = j * sectorStep;           // from 0 to 2pi
+
+            // vertex position
+            x = xy * cosf(sectorAngle);             // r * cos(u) * cos(v)
+            y = xy * sinf(sectorAngle);             // r * cos(u) * sin(v)
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
+        }
+    }
+
+    // indices
+    unsigned int k1, k2;
+    for(unsigned int i = 0; i < stackCount; ++i)
+    {
+        k1 = i * (sectorCount + 1);     // beginning of current stack
+        k2 = k1 + sectorCount + 1;      // beginning of next stack
+
+        for(unsigned int j = 0; j < sectorCount; ++j, ++k1, ++k2)
+        {
+            if(i != 0)
+            {
+                indices.push_back(k1);
+                indices.push_back(k2);
+                indices.push_back(k1 + 1);
+            }
+
+            if(i != (stackCount-1))
+            {
+                indices.push_back(k1 + 1);
+                indices.push_back(k2);
+                indices.push_back(k2 + 1);
+            }
+        }
+    }
+
+    indexCount = indices.size();
+
+    // Generate buffers
+    glGenVertexArrays(1, &sphereVAO);
+    glGenBuffers(1, &sphereVBO);
+    glGenBuffers(1, &sphereEBO);
+
+    glBindVertexArray(sphereVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
+
+    // Vertex Positions
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
+}
+
+// Update the drawSphere function
+void drawSphere() {
+    if(sphereVAO == 0)
+        generateSphere(1.0f, 36, 18); // Generate a unit sphere once
+
+    // **Remove scaling and model matrix setting**
+    // float scaledRadius = radius * NANOMETER_TO_WORLD_SCALE;
+    // glm::mat4 model = glm::scale(glm::mat4(1.0f), glm::vec3(scaledRadius));
+    // GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+    // glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
 void initVisualization() {
     // Initialize GLFW
     if (!glfwInit()) {
@@ -402,7 +518,7 @@ void initVisualization() {
     }
 
     // Create a windowed mode window and its OpenGL context
-    window = glfwCreateWindow(1024, 768, "Molecular Simulation Visualization", NULL, NULL);
+    window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Molecular Simulation Visualization", NULL, NULL);
     if (!window) {
         glfwTerminate();
         exit(EXIT_FAILURE);
@@ -434,8 +550,11 @@ void initVisualization() {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
+    // Adjust the camera distance to match the new scale
+    cameraDistance = 100.0f * NANOMETER_TO_WORLD_SCALE;
+
     // Set up projection and view matrices
-    projection = glm::perspective(glm::radians(45.0f), 1024.0f / 768.0f, 0.1f, 1000.0f);
+    projection = glm::perspective(glm::radians(45.0f), static_cast<float>(WINDOW_WIDTH) / WINDOW_HEIGHT, 0.1f, 1000.0f * NANOMETER_TO_WORLD_SCALE);
     view = glm::lookAt(glm::vec3(0.0f, 0.0f, cameraDistance),
                        glm::vec3(0.0f, 0.0f, 0.0f),
                        glm::vec3(0.0f, 1.0f, 0.0f));
@@ -457,9 +576,12 @@ void initVisualization() {
 
     // Initialize text rendering
     initTextRendering();
+
+    // Generate sphere mesh with a default radius (will be scaled per molecule)
+    generateSphere(1.0f, 36, 18); // Base radius of 1.0f
 }
 
-void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules) {
+void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time) {
     printf("Rendering simulation\n");
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -484,27 +606,43 @@ void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>&
         // Get the position of the molecule
         float x, y, z;
         molecule.getPosition(x, y, z);
-        glm::vec3 position(x, y, z);
-
-        // Set model matrix for each molecule
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), position);
-        GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glm::vec3 position(x * NANOMETER_TO_WORLD_SCALE, y * NANOMETER_TO_WORLD_SCALE, z * NANOMETER_TO_WORLD_SCALE);
 
         // Set color and size based on molecule type
         glm::vec3 color = getMoleculeColor(molecule.getType());
         float size = getMoleculeSize(molecule.getType());
         GLint colorLoc = glGetUniformLocation(shaderProgram, "color");
-        GLint sizeLoc = glGetUniformLocation(shaderProgram, "size");
         glUniform3fv(colorLoc, 1, glm::value_ptr(color));
-        glUniform1f(sizeLoc, size);
 
-        // Draw the molecule (as a point sprite)
-        glDrawArrays(GL_POINTS, 0, 1);
+        // **Combine translation and scaling into the model matrix**
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), position);
+        float scaledRadius = size * NANOMETER_TO_WORLD_SCALE;
+        model = glm::scale(model, glm::vec3(scaledRadius));
+
+        // Set the model uniform
+        GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+        // Draw the molecule as a sphere
+        drawSphere();
     }
+
+    // Set up OpenGL state for 2D rendering
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Render total simulated time at the top left
+    char timeText[50];
+    sprintf(timeText, "Simulated Time: %.6f s", total_simulated_time);
+    renderText(timeText, 10.0f, 30.0f, TEXT_SCALE, glm::vec3(1.0f, 1.0f, 1.0f));
 
     // Render molecule counts
     renderMoleculeCounts(molecules);
+
+    // Restore OpenGL state
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
 
     // Swap buffers and poll events
     glfwSwapBuffers(window);
@@ -517,13 +655,13 @@ void renderMoleculeCounts(const std::vector<Molecule>& molecules) {
         moleculeCounts[molecule.getType()]++;
     }
 
-    float yOffset = 10.0f; // Start from 10 pixels from the top
+    float yOffset = 2 * LINE_HEIGHT; // Start below the simulated time text
     for (const auto& pair : moleculeCounts) {
         MoleculeType type = pair.first;
         int count = pair.second;
         std::string text = std::string(getMoleculeTypeName(type)) + ": " + std::to_string(count);
-        renderText(text, 10.0f, yOffset, 0.5f, glm::vec3(1.0f, 1.0f, 1.0f));
-        yOffset += 30.0f; // Move down for next line (adjust as needed)
+        renderText(text, 10.0f, yOffset, TEXT_SCALE, glm::vec3(1.0f, 1.0f, 1.0f));
+        yOffset += LINE_HEIGHT;
     }
 }
 
@@ -540,27 +678,28 @@ void renderText(const std::string &text, float x, float y, float scale, glm::vec
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     // Initialize cursor position
-    float x_cursor = x; // Start from the initial x position
+    float x_cursor = x;
 
     // Iterate over all characters
     std::string::const_iterator c;
     for (c = text.begin(); c != text.end(); c++) {
         Character ch = Characters[*c];
 
+        // Adjust the y-position calculation
         float xpos = x_cursor + ch.Bearing.x * scale;
-        float ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
+        float ypos = WINDOW_HEIGHT - (y - ch.Bearing.y * scale);  // Invert y-coordinate
 
         float w = ch.Size.x * scale;
         float h = ch.Size.y * scale;
 
         // Update VBO for each character
         float vertices[6][4] = {
-            { xpos,     ypos + h,   0.0f, 1.0f },
+            { xpos,     ypos - h,   0.0f, 1.0f },
             { xpos + w, ypos,       1.0f, 0.0f },
             { xpos,     ypos,       0.0f, 0.0f },
 
-            { xpos,     ypos + h,   0.0f, 1.0f },
-            { xpos + w, ypos + h,   1.0f, 1.0f },
+            { xpos,     ypos - h,   0.0f, 1.0f },
+            { xpos + w, ypos - h,   1.0f, 1.0f },
             { xpos + w, ypos,       1.0f, 0.0f }
         };
 
@@ -570,12 +709,13 @@ void renderText(const std::string &text, float x, float y, float scale, glm::vec
         // Update content of VBO memory
         glBindBuffer(GL_ARRAY_BUFFER, textVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // Render quad
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         // Advance cursor for the next character
-        x_cursor += (ch.Advance >> 6) * scale; // Bitshift by 6 to convert from 1/64 pixels
+        x_cursor += (ch.Advance >> 6) * scale;
     }
 
     // Re-enable depth testing and disable blending after text rendering
@@ -591,4 +731,8 @@ void cleanupVisualization() {
     glDeleteBuffers(1, &VBO);
     glDeleteProgram(shaderProgram);
     glfwTerminate();
+
+    glDeleteVertexArrays(1, &sphereVAO);
+    glDeleteBuffers(1, &sphereVBO);
+    glDeleteBuffers(1, &sphereEBO);
 }

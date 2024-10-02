@@ -48,7 +48,6 @@ class Molecule {
 public:
     // Member variables
     float3 centerOfMass;
-    float vx, vy, vz;
     MoleculeType type;
     bool markedForDeletion;
     MoleculeType creationFlag;

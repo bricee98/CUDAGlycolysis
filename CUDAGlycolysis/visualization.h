@@ -13,7 +13,7 @@ extern GLFWwindow* window;
 extern bool isPaused;
 
 void initVisualization();
-void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules);
+void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time);
 void cleanupVisualization();
 
 #endif // VISUALIZATION_H

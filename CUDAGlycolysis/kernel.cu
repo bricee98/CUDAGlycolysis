@@ -20,24 +20,24 @@ int h_GRID_SIZE_Z = 10;
 #include <cstdio>
 #include <assert.h>
 // Constants for interaction radius and reaction probabilities
-#define INTERACTION_RADIUS 5.0f  // nm
+#define INTERACTION_RADIUS 5.0       // nm
 #define INTERACTION_RADIUS_SQ (INTERACTION_RADIUS * INTERACTION_RADIUS)
-#define BASE_REACTION_PROBABILITY 1e-6f  // Adjusted for microsecond timescale
+#define BASE_REACTION_PROBABILITY 1e-6  // Adjusted for microsecond timescale
 #define ENZYME_CATALYSIS_FACTOR 100.0f
 #define NUM_REACTION_TYPES 10
 
 // Constants for force calculations
-#define COULOMB_CONSTANT 138.935458f  // (kJ*nm)/(mol*e^2)
+#define COULOMB_CONSTANT 138.935458      // Keep as double by default
 #define CUTOFF_DISTANCE 10.0f  // nm
 #define CUTOFF_DISTANCE_SQ (CUTOFF_DISTANCE * CUTOFF_DISTANCE)
-#define EPSILON_0 8.854187817e-12f  // F/m (Vacuum permittivity)
-#define K_BOLTZMANN 0.0083144621f  // kJ/(mol*K)
-#define TEMPERATURE 310.15f  // K (37°C)
+#define EPSILON_0 8.854187817e-12        // F/m (Vacuum permittivity)
+#define K_BOLTZMANN 1.380649e-23         // J/K
+#define TEMPERATURE 310.15               // K (37°C)
 #define SOLVENT_DIELECTRIC 78.5f  // Dimensionless (for water at 37°C)
 
 #define CELL_SIZE 10.0f  // nm
 
-#define VISCOSITY 6.91e-4f  // kJ*s/(nm^3*mol) (viscosity of water at 37°C)
+#define VISCOSITY 6.91e-13               // kg/(nm·s)
 
 #define REPULSION_COEFFICIENT 1.0f  // Adjust as needed
 
@@ -378,24 +378,46 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
 }
 
 // Kernel to apply forces and update positions
-__global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, float dt, curandState* randStates) {
+__global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molecules, SimulationSpace space, double dt, curandState* randStates) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_molecules) {
         Molecule& mol = molecules[idx];
 
-        // Calculate diffusion coefficient (D)
-        float gamma = 6.0f * 3.14159265358979323846f * mol.radius * VISCOSITY;
-        float D = K_BOLTZMANN * TEMPERATURE / gamma; // nm^2/s
-        D *= 1e-6f; // Convert D to nm^2/μs
+        // Using double precision for gamma and D
+        double gamma = 6.0 * 3.14159265358979323846 * mol.radius * VISCOSITY;
+
+        if (idx == 0) {
+            printf("gamma: %e\n", gamma);
+        }
+
+        double D = (K_BOLTZMANN * TEMPERATURE) / gamma; // nm^2/s
+        if (idx == 0) {
+            printf("D: %e\n", D);
+        }
+
+        // Convert D to nm^2/μs accounting for 1 μs = 1e-6 s and 1 m2 = 1e18 nm2
+        D *= 1e-6 * 1e18;
+
+        if (idx == 0) {
+            printf("D converted: %e\n", D);
+        }
 
         // Random displacement due to Brownian motion
         curandState localState = randStates[idx];
-        float sqrtTerm = sqrtf(2.0f * D * dt);
+        double sqrtTerm = sqrt(2.0 * D * dt);
 
-        float3 randomDisplacement;
+        if (idx == 0) {
+            printf("sqrtTerm: %e\n", sqrtTerm);
+        }
+
+        double3 randomDisplacement;
         randomDisplacement.x = curand_normal(&localState) * sqrtTerm;
         randomDisplacement.y = curand_normal(&localState) * sqrtTerm;
         randomDisplacement.z = curand_normal(&localState) * sqrtTerm;
+
+        if (idx == 0) {
+            printf("randomDisplacement: %e, %e, %e\n", randomDisplacement.x, randomDisplacement.y, randomDisplacement.z);
+        }
 
         // Update position
         mol.centerOfMass.x += randomDisplacement.x;
@@ -405,19 +427,21 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
         // Handle boundary conditions
         // Bounce off walls
         if (mol.centerOfMass.x < 0 || mol.centerOfMass.x > space.width) {
-            mol.vx = -mol.vx;
             mol.centerOfMass.x = fmaxf(0.0f, fminf(mol.centerOfMass.x, space.width));
         }
         if (mol.centerOfMass.y < 0 || mol.centerOfMass.y > space.height) {
-            mol.vy = -mol.vy;
             mol.centerOfMass.y = fmaxf(0.0f, fminf(mol.centerOfMass.y, space.height));
         }
         if (mol.centerOfMass.z < 0 || mol.centerOfMass.z > space.depth) {
-            mol.vz = -mol.vz;
             mol.centerOfMass.z = fmaxf(0.0f, fminf(mol.centerOfMass.z, space.depth));
         }
 
         // Update the random state
         randStates[idx] = localState;
+
+        if (idx == 0) {
+            printf("gamma: %e\n", gamma);
+            printf("D: %e\n", D);
+        }
     }
 }
