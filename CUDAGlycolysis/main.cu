@@ -197,7 +197,7 @@ void processCreationDeletionFlags(Molecule* molecules, int* num_molecules, int m
 
 // Modify the runSimulation function to use runSimulationStep
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks) {
-    printf("Starting simulation with %d molecules for %d ticks\n", space->num_molecules, num_ticks);
+    //printf("Starting simulation with %d molecules for %d ticks\n", space->num_molecules, num_ticks);
 
     cudaError_t cudaStatus;
 
@@ -207,11 +207,11 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
         fprintf(stderr, "cudaSetDevice failed! Do you have a CUDA-capable GPU installed?\n");
         return cudaStatus;
     }
-    printf("CUDA device set successfully\n");
+    //printf("CUDA device set successfully\n");
 
     // Main simulation loop
     for (int tick = 0; tick < num_ticks; tick++) {
-        printf("Starting tick %d\n", tick);
+        //printf("Starting tick %d\n", tick);
 
         cudaStatus = runSimulationStep(space, molecules);
         if (cudaStatus != cudaSuccess) {
@@ -219,10 +219,10 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
             break;
         }
 
-        printf("Completed tick %d\n", tick);
+        //printf("Completed tick %d\n", tick);
     }
 
-    printf("Simulation completed\n");
+    //printf("Simulation completed\n");
 
     return cudaStatus;
 }
@@ -249,7 +249,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     grid.sizeY = gridSizeY;
     grid.sizeZ = gridSizeZ;
 
-    printf("Grid Sizes - X: %d, Y: %d, Z: %d\n", grid.sizeX, grid.sizeY, grid.sizeZ);
+    //printf("Grid Sizes - X: %d, Y: %d, Z: %d\n", grid.sizeX, grid.sizeY, grid.sizeZ);
 
     cudaError_t cudaStatus;
     int threadsPerBlock = 256;
@@ -260,7 +260,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
 
     // Calculate total cells
     int totalCells = grid.sizeX * grid.sizeY * grid.sizeZ;
-    printf("Total cells: %d\n", totalCells);
+    //printf("Total cells: %d\n", totalCells);
 
     if (dev_cells == nullptr) {
         cudaStatus = cudaMalloc(&dev_cells, totalCells * sizeof(Cell));
@@ -310,7 +310,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         fprintf(stderr, "cudaMemGetInfo failed! Error: %s\n", cudaGetErrorString(cudaStatus));
         return cudaStatus;
     }
-    printf("Available memory: %zu bytes\n", availableMemory);
+    //printf("Available memory: %zu bytes\n", availableMemory);
 
     // Copy current state to device
     cudaStatus = cudaMemcpy(dev_molecules, molecules, MAX_MOLECULES * sizeof(Molecule), cudaMemcpyHostToDevice);
@@ -319,21 +319,21 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         return cudaStatus;
     }
 
-    printf("Copied molecules to device\n");
+    //printf("Copied molecules to device\n");
 
     cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n"); return cudaStatus; }
-    printf("Copied num_molecules to device\n");
+    //printf("Copied num_molecules to device\n");
 
     cudaMemset(dev_reactionCounts, 0, NUM_REACTION_TYPES * sizeof(int));
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
-    printf("Reset reaction counts, numCreations, and numDeletions\n");
+    //printf("Reset reaction counts, numCreations, and numDeletions\n");
     // Assign molecules to cells
     dim3 gridAssign((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock);
     assignMoleculesToCells<<<gridAssign, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_cells, *space, grid);
-    printf("Assigned molecules to cells\n");
-    // Synchronize to ensure kernel execution completion and flush printf output
+    //printf("Assigned molecules to cells\n");
+    // Synchronize to ensure kernel execution completion and flush //printf output
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching assignMoleculesToCells kernel!\n", cudaStatus);
@@ -343,7 +343,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
 
     // Reset forces
     cudaMemset(dev_forces, 0, space->num_molecules * sizeof(float3));
-    printf("Reset forces\n");
+    //printf("Reset forces\n");
     // Adjust the timestep for microsecond timescales
     float dt = 1e-6f; // Timestep of 1 microsecond
 
@@ -351,13 +351,13 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(
         dev_molecules, space->num_molecules, *space, dt, dev_states);
 
-    // Synchronize to ensure kernel execution completion and flush printf output
+    // Synchronize to ensure kernel execution completion and flush //printf output
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching applyForcesAndUpdatePositions kernel!\n", cudaStatus);
         return cudaStatus;
     }
-    printf("Applied forces and updated positions\n");
+    //printf("Applied forces and updated positions\n");
     // Handle interactions
     handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
                                                            dev_reactionCounts, dev_creationBuffer, dev_numCreations,
@@ -370,7 +370,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         return err;
     }
 
-    // Synchronize to ensure kernel execution completion and flush printf output
+    // Synchronize to ensure kernel execution completion and flush //printf output
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching handleInteractions kernel!\n", cudaStatus);
@@ -384,14 +384,14 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         return cudaStatus;
     }
 
-    printf("Copied updated molecules to host\n");
+    //printf("Copied updated molecules to host\n");
 
-    printf("Handled interactions\n");
+    //printf("Handled interactions\n");
     // Copy the number of creations and deletions back to the host
     int h_numCreations, h_numDeletions;
     cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
-    printf("Copied numCreations (%d) and numDeletions (%d) to host\n", h_numCreations, h_numDeletions);
+    //printf("Copied numCreations (%d) and numDeletions (%d) to host\n", h_numCreations, h_numDeletions);
 
     // Allocate host buffers for creations and deletions
     MoleculeCreationInfo* h_creationBuffer = nullptr;
@@ -401,21 +401,21 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         h_creationBuffer = new MoleculeCreationInfo[h_numCreations];
         // Copy creation buffer back to the host
         cudaMemcpy(h_creationBuffer, dev_creationBuffer, h_numCreations * sizeof(MoleculeCreationInfo), cudaMemcpyDeviceToHost);
-        printf("Allocated and copied creation buffer to host\n");
+        //printf("Allocated and copied creation buffer to host\n");
     }
 
     if (h_numDeletions > 0) {
         h_deletionBuffer = new int[h_numDeletions];
         // Copy deletion buffer back to the host
         cudaMemcpy(h_deletionBuffer, dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
-        printf("Allocated and copied deletion buffer to host\n");
+        //printf("Allocated and copied deletion buffer to host\n");
     }
 
     // Process creation and deletion flags
     processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES,
                                  h_creationBuffer, h_numCreations,
                                  h_deletionBuffer, h_numDeletions);
-    printf("Processed creation and deletion flags\n");
+    //printf("Processed creation and deletion flags\n");
 
     // Free host buffers
     if (h_creationBuffer) {
@@ -424,35 +424,35 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     if (h_deletionBuffer) {
         delete[] h_deletionBuffer;
     }
-    printf("Freed host buffers\n");
+    //printf("Freed host buffers\n");
     // Copy updated molecules back to the device
     cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for molecules to dev_molecules!\n"); return cudaStatus; }
-    printf("Copied updated molecules to device\n");
+    //printf("Copied updated molecules to device\n");
 
     // Print the position of molecule 500
-    printf("Host Molecule 500: Position (%f, %f, %f)\n", molecules[500].centerOfMass.x, molecules[500].centerOfMass.y, molecules[500].centerOfMass.z);
+    //printf("Host Molecule 500: Position (%f, %f, %f)\n", molecules[500].centerOfMass.x, molecules[500].centerOfMass.y, molecules[500].centerOfMass.z);
 
     cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n"); return cudaStatus; }
-    printf("Copied updated num_molecules to device\n");
+    //printf("Copied updated num_molecules to device\n");
     // Check for errors
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
         return cudaStatus;
     }
-    printf("Checked for errors\n");
+    //printf("Checked for errors\n");
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching kernels!\n", cudaStatus);
         return cudaStatus;
     }
-    printf("Synchronized device\n");
+    //printf("Synchronized device\n");
     // Copy updated molecules back to host
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for dev_molecules to molecules!\n"); return cudaStatus; }
-    printf("Copied updated molecules to host\n");
+    //printf("Copied updated molecules to host\n");
 
     // 4. Move the total_simulated_time update before the return statement
     total_simulated_time += dt;
@@ -470,17 +470,17 @@ int main() {
         return 1;
     }
 
-    printf("CUDA Device Properties:\n");
-    printf("  Device name: %s\n", deviceProp.name);
-    printf("  Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
-    printf("  Total global memory: %zu bytes\n", deviceProp.totalGlobalMem);
-    printf("  Max threads per block: %d\n", deviceProp.maxThreadsPerBlock);
-    printf("  Max threads dim: (%d, %d, %d)\n", deviceProp.maxThreadsDim[0], deviceProp.maxThreadsDim[1], deviceProp.maxThreadsDim[2]);
-    printf("  Max grid size: (%d, %d, %d)\n", deviceProp.maxGridSize[0], deviceProp.maxGridSize[1], deviceProp.maxGridSize[2]);
-    printf("  Warp size: %d\n", deviceProp.warpSize);
-    printf("  Memory clock rate: %d kHz\n", deviceProp.memoryClockRate);
-    printf("  Memory bus width: %d bits\n", deviceProp.memoryBusWidth);
-    printf("\n");
+    //printf("CUDA Device Properties:\n");
+    //printf("  Device name: %s\n", deviceProp.name);
+    //printf("  Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
+    //printf("  Total global memory: %zu bytes\n", deviceProp.totalGlobalMem);
+    //printf("  Max threads per block: %d\n", deviceProp.maxThreadsPerBlock);
+    //printf("  Max threads dim: (%d, %d, %d)\n", deviceProp.maxThreadsDim[0], deviceProp.maxThreadsDim[1], deviceProp.maxThreadsDim[2]);
+    //printf("  Max grid size: (%d, %d, %d)\n", deviceProp.maxGridSize[0], deviceProp.maxGridSize[1], deviceProp.maxGridSize[2]);
+    //printf("  Warp size: %d\n", deviceProp.warpSize);
+    //printf("  Memory clock rate: %d kHz\n", deviceProp.memoryClockRate);
+    //printf("  Memory bus width: %d bits\n", deviceProp.memoryBusWidth);
+    //printf("\n");
 
     SimulationSpace space;
     Molecule* molecules = nullptr;
@@ -503,9 +503,9 @@ int main() {
                 space.height = (float)read_height;
                 space.depth = (float)read_depth;
 
-                printf("Read from file - Space width: %.2f\n", space.width);
-                printf("Read from file - Space height: %.2f\n", space.height);
-                printf("Read from file - Space depth: %.2f\n", space.depth);
+                //printf("Read from file - Space width: %.2f\n", space.width);
+                //printf("Read from file - Space height: %.2f\n", space.height);
+                //printf("Read from file - Space depth: %.2f\n", space.depth);
             } else {
                 fprintf(stderr, "Failed to read simulation space dimensions\n");
                 // Set default values
@@ -514,7 +514,7 @@ int main() {
                 space.depth = 100.0f;
             }
             
-            printf("Simulation space dimensions: %.2f x %.2f x %.2f\n", space.width, space.height, space.depth);
+            //printf("Simulation space dimensions: %.2f x %.2f x %.2f\n", space.width, space.height, space.depth);
             break;
         }
     }
@@ -527,7 +527,7 @@ int main() {
                 fclose(input_file);
                 return 1;
             }
-            printf("Number of molecule types: %d\n", space.num_molecule_types);
+            //printf("Number of molecule types: %d\n", space.num_molecule_types);
             break;
         }
     }
@@ -542,7 +542,7 @@ int main() {
             if (sscanf(line, "%[^:]: %d", molecule_name, &count) == 2) {
                 space.molecule_counts[molecule_type] = count;
                 space.num_molecules += count;
-                printf("Molecule type %d (%s): %d\n", molecule_type, molecule_name, count);
+                //printf("Molecule type %d (%s): %d\n", molecule_type, molecule_name, count);
                 molecule_type++;
             }
         }
@@ -550,7 +550,7 @@ int main() {
 
     fclose(input_file);
 
-    printf("Total number of molecules: %d\n", space.num_molecules);
+    //printf("Total number of molecules: %d\n", space.num_molecules);
 
     // Before allocating memory for molecules
     if (space.num_molecules > MAX_MOLECULES) {
@@ -565,7 +565,7 @@ int main() {
         return 1;
     }
 
-    printf("Molecules allocated successfully\n");
+    //printf("Molecules allocated successfully\n");
 
     // Initialize molecules
     int molecule_index = 0;
@@ -575,7 +575,7 @@ int main() {
         MoleculeType currentType = static_cast<MoleculeType>(i);
         int count = space.molecule_counts[i];
 
-        printf("Creating %d molecules of type %d (%s)\n", count, i, getMoleculeTypeName(currentType));
+        //printf("Creating %d molecules of type %d (%s)\n", count, i, getMoleculeTypeName(currentType));
 
         for (int j = 0; j < count; j++) {
             if (molecule_index >= MAX_MOLECULES) {
@@ -596,14 +596,14 @@ int main() {
 
             type_counts[i]++;
         }
-        printf("Created molecule type %d (%s): %d\n", i, getMoleculeTypeName(currentType), type_counts[i]);
+        //printf("Created molecule type %d (%s): %d\n", i, getMoleculeTypeName(currentType), type_counts[i]);
     }
 
     // Print summary of all molecule types created
-    printf("\nSummary of molecules created:\n");
+    //printf("\nSummary of molecules created:\n");
     for (int i = 0; i < space.num_molecule_types; i++) {
         if (type_counts[i] > 0) {
-            printf("%s: %d\n", getMoleculeTypeName(static_cast<MoleculeType>(i)), type_counts[i]);
+            //printf("%s: %d\n", getMoleculeTypeName(static_cast<MoleculeType>(i)), type_counts[i]);
         }
     }
 
@@ -614,7 +614,7 @@ int main() {
         return 1;
     }
 
-    printf("\nTotal molecules initialized successfully: %d\n", molecule_index);
+    //printf("\nTotal molecules initialized successfully: %d\n", molecule_index);
 
     // Initialize visualization
     initVisualization();
@@ -631,7 +631,7 @@ int main() {
         }
 
         // Render the current state of the simulation
-        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time);
+        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time, 1.0f);
     }
 
     // Cleanup

@@ -1,5 +1,5 @@
 # Simulation space dimensions (width height depth)
-1000 1000 1000  # Increased simulation space to 1x1x1 micrometers
+250 250 250  # Increased simulation space to 1x1x1 micrometers
 # Number of molecule types
 33
 # Molecule counts

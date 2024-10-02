@@ -19,7 +19,7 @@
 
 // Function prototypes
 void initVisualization();
-void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time);
+void renderSimulation();
 void cleanupVisualization();
 void initTextRendering();
 glm::vec3 getMoleculeColor(MoleculeType type);
@@ -40,6 +40,27 @@ float cameraRotationX = 0.0f;
 float cameraRotationY = 0.0f;
 const float NANOMETER_TO_WORLD_SCALE = 10.0f;
 
+// Update these constants at the top of the file
+const int WINDOW_WIDTH = 1600;
+const int WINDOW_HEIGHT = 900;
+const float TEXT_SCALE = 0.3f;
+const float LINE_HEIGHT = 24.0f;
+const float MAX_CAMERA_DISTANCE = 1000.0f * NANOMETER_TO_WORLD_SCALE;
+const float PAN_SPEED = 50.0f * NANOMETER_TO_WORLD_SCALE;  // Increased speed for noticeable movement
+
+// Add these constants at the top of the file
+const float MIN_PARTICLE_SIZE = 0.5f; // Minimum size in nanometers
+const float DISTANCE_SCALE_FACTOR = 50.0f; // Adjust to control size scaling with distance
+
+// Add these global variables for camera position
+glm::vec3 cameraPosition(0.0f, 0.0f, cameraDistance);
+glm::vec3 cameraFront(0.0f, 0.0f, -1.0f);
+glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
+
+// Add these global variables for camera orientation
+float yaw = -90.0f;    // Initialized to -90.0 degrees to look towards the negative Z-axis
+float pitch = 0.0f;
+
 // Shader source code (we'll implement these later)
 const char* vertexShaderSource = R"(
     #version 330 core
@@ -48,24 +69,64 @@ const char* vertexShaderSource = R"(
     uniform mat4 model;
     uniform mat4 view;
     uniform mat4 projection;
-    uniform float size;
+    
+    out vec3 FragPos;
+    out vec3 Normal;
     
     void main()
     {
-        gl_Position = projection * view * model * vec4(aPos, 1.0);
-        gl_PointSize = size;
+        // Calculate fragment position in world space
+        FragPos = vec3(model * vec4(aPos, 1.0));
+        
+        // Calculate normal vector
+        Normal = mat3(transpose(inverse(model))) * aPos;
+        
+        // Output vertex position
+        gl_Position = projection * view * vec4(FragPos, 1.0);
     }
 )";
 
+// Update the fragment shader to include a glow effect
 const char* fragmentShaderSource = R"(
     #version 330 core
+    in vec3 FragPos;
+    in vec3 Normal;
+    
     out vec4 FragColor;
     
     uniform vec3 color;
+    uniform vec3 viewPos;
     
     void main()
     {
-        FragColor = vec4(color, 1.0);
+        // Ambient lighting
+        float ambientStrength = 0.3;
+        vec3 ambient = ambientStrength * color;
+        
+        // Calculate the normal vector and light direction
+        vec3 norm = normalize(Normal);
+        vec3 lightDir = normalize(viewPos - FragPos);
+        
+        // Diffuse lighting
+        float diff = max(dot(norm, lightDir), 0.0);
+        vec3 diffuse = diff * color;
+        
+        // Specular lighting
+        float specularStrength = 0.5;
+        vec3 viewDir = normalize(viewPos - FragPos);
+        vec3 reflectDir = reflect(-lightDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+        vec3 specular = specularStrength * spec * vec3(1.0);
+        
+        // Combine all lighting components
+        vec3 result = ambient + diffuse + specular;
+        
+        // Add glow effect based on distance from the center
+        float distance = length(FragPos - viewPos);
+        float glow = 1.0 / (distance * 0.1);
+        result += vec3(glow);
+        
+        FragColor = vec4(result, 1.0);
     }
 )";
 
@@ -132,40 +193,55 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
-// Function to handle mouse input for camera control
-void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
-    static float lastX = 400, lastY = 300;
-    static bool firstMouse = true;
+// Declare these global variables at the top of the file
+float lastX = WINDOW_WIDTH / 2.0f;
+float lastY = WINDOW_HEIGHT / 2.0f;
+bool firstMouse = true;
 
+// Update the mouseCallback function
+void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     if (firstMouse) {
-        lastX = xpos;
-        lastY = ypos;
+        lastX = float(xpos);
+        lastY = float(ypos);
         firstMouse = false;
     }
 
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos;
-    lastX = xpos;
-    lastY = ypos;
+    float xoffset = float(xpos) - lastX;
+    float yoffset = lastY - float(ypos); // Reversed since y-coordinates go from bottom to top
+    lastX = float(xpos);
+    lastY = float(ypos);
 
     float sensitivity = 0.1f;
     xoffset *= sensitivity;
     yoffset *= sensitivity;
 
-    cameraRotationY += xoffset;
-    cameraRotationX += yoffset;
+    yaw += xoffset;
+    pitch += yoffset;
 
-    if (cameraRotationX > 89.0f) cameraRotationX = 89.0f;
-    if (cameraRotationX < -89.0f) cameraRotationX = -89.0f;
+    // Constrain the pitch angle to prevent screen flip
+    if (pitch > 89.0f)
+        pitch = 89.0f;
+    if (pitch < -89.0f)
+        pitch = -89.0f;
+
+    // Update cameraFront vector based on updated yaw and pitch
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
 }
 
-// Function to handle mouse scroll for zoom
+// Update the scrollCallback function to maintain zoom functionality
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    cameraDistance -= yoffset * 5.0f * NANOMETER_TO_WORLD_SCALE;
-    if (cameraDistance < 10.0f * NANOMETER_TO_WORLD_SCALE) cameraDistance = 10.0f * NANOMETER_TO_WORLD_SCALE;
-    if (cameraDistance > 200.0f * NANOMETER_TO_WORLD_SCALE) cameraDistance = 200.0f * NANOMETER_TO_WORLD_SCALE;
+    cameraDistance -= yoffset * 10.0f * NANOMETER_TO_WORLD_SCALE;
+    if (cameraDistance < 10.0f * NANOMETER_TO_WORLD_SCALE)
+        cameraDistance = 10.0f * NANOMETER_TO_WORLD_SCALE;
+    if (cameraDistance > MAX_CAMERA_DISTANCE)
+        cameraDistance = MAX_CAMERA_DISTANCE;
 }
 
+// Define getMoleculeColor and getMoleculeSize before they're used
 // Define getMoleculeColor and getMoleculeSize before they're used
 glm::vec3 getMoleculeColor(MoleculeType type) {
     switch (type) {
@@ -253,11 +329,7 @@ float getMoleculeSize(MoleculeType type) {
     }
 }
 
-// Update these constants at the top of the file
-const int WINDOW_WIDTH = 1600;
-const int WINDOW_HEIGHT = 900;
-const float TEXT_SCALE = 0.3f;
-const float LINE_HEIGHT = 24.0f;
+
 
 void initTextRendering() {
     if (FT_Init_FreeType(&ft)) {
@@ -278,7 +350,8 @@ void initTextRendering() {
         fprintf(stderr, "Font file not found or other error\n");
     }
 
-    FT_Set_Pixel_Sizes(face, 0, 48);
+    // Increase the font size (was 48, now 64)
+    FT_Set_Pixel_Sizes(face, 0, 64);
 
     glGenVertexArrays(1, &textVAO);
     glGenBuffers(1, &textVBO);
@@ -499,15 +572,26 @@ void drawSphere() {
     if(sphereVAO == 0)
         generateSphere(1.0f, 36, 18); // Generate a unit sphere once
 
-    // **Remove scaling and model matrix setting**
-    // float scaledRadius = radius * NANOMETER_TO_WORLD_SCALE;
-    // glm::mat4 model = glm::scale(glm::mat4(1.0f), glm::vec3(scaledRadius));
-    // GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
-    // glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
     glBindVertexArray(sphereVAO);
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
+}
+
+// Add this callback function to handle window resizing
+void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+{
+    // Adjust the viewport to the new window dimensions
+    glViewport(0, 0, width, height);
+
+    // Update the projection matrix with the new aspect ratio
+    projection = glm::perspective(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 1000.0f * NANOMETER_TO_WORLD_SCALE);
+
+    // Update the text projection matrix
+    textProjection = glm::ortho(0.0f, static_cast<float>(width), 0.0f, static_cast<float>(height));
+
+    // Update the text shader with the new projection matrix
+    glUseProgram(textShaderProgram);
+    glUniformMatrix4fv(glGetUniformLocation(textShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(textProjection));
 }
 
 void initVisualization() {
@@ -544,11 +628,13 @@ void initVisualization() {
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
 
-    // Set up vertex attributes (position, color)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    // Set up a single vertex at the origin
+    float vertex[] = {0.0f, 0.0f, 0.0f};
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    // Set up vertex attributes (position only)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
 
     // Adjust the camera distance to match the new scale
     cameraDistance = 100.0f * NANOMETER_TO_WORLD_SCALE;
@@ -567,6 +653,9 @@ void initVisualization() {
     glfwSetCursorPosCallback(window, mouseCallback);
     glfwSetScrollCallback(window, scrollCallback);
 
+    // Add this line to set the framebuffer size callback
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
     // Enable cursor capture for camera control
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -579,9 +668,40 @@ void initVisualization() {
 
     // Generate sphere mesh with a default radius (will be scaled per molecule)
     generateSphere(1.0f, 36, 18); // Base radius of 1.0f
+
+    // Adjust the initial camera position to match the new scale
+    cameraPosition = glm::vec3(0.0f, 0.0f, cameraDistance);
+    cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);  // Ensure initial front vector
 }
 
-void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time) {
+// Update the processInput function to handle continuous key input and separate vertical movement
+void processInput(GLFWwindow* window, float deltaTime) {
+    float cameraSpeed = PAN_SPEED * deltaTime;
+
+    // Move forward and backward
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPosition += cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPosition -= cameraSpeed * cameraFront;
+
+    // Strafe left and right
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPosition -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPosition += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+
+    // Move up and down
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        cameraPosition += cameraSpeed * cameraUp;
+    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
+        cameraPosition -= cameraSpeed * cameraUp;
+}
+
+// Add a callback for handling mouse movement to adjust camera rotation
+
+
+// Update the renderSimulation function
+void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time, float deltaTime) {
     printf("Rendering simulation\n");
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -589,17 +709,23 @@ void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>&
     // Use the shader program
     glUseProgram(shaderProgram);
 
-    // Update view matrix based on camera rotation and distance
-    glm::mat4 view = glm::mat4(1.0f);
-    view = glm::translate(view, glm::vec3(0.0f, 0.0f, -cameraDistance));
-    view = glm::rotate(view, glm::radians(cameraRotationX), glm::vec3(1.0f, 0.0f, 0.0f));
-    view = glm::rotate(view, glm::radians(cameraRotationY), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Process input
+    processInput(window, deltaTime);
+
+    // Update view matrix based on camera position and front vector
+    glm::mat4 view = glm::lookAt(cameraPosition,
+                                 cameraPosition + cameraFront,
+                                 cameraUp);
 
     // Set projection and view matrices in the shader
     GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
     GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+
+    // Set the view position uniform
+    GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
+    glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPosition));
 
     // Render each molecule
     for (const auto& molecule : molecules) {
@@ -608,20 +734,20 @@ void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>&
         molecule.getPosition(x, y, z);
         glm::vec3 position(x * NANOMETER_TO_WORLD_SCALE, y * NANOMETER_TO_WORLD_SCALE, z * NANOMETER_TO_WORLD_SCALE);
 
-        // Set color and size based on molecule type
+        // Set color based on molecule type
         glm::vec3 color = getMoleculeColor(molecule.getType());
         float size = getMoleculeSize(molecule.getType());
-        GLint colorLoc = glGetUniformLocation(shaderProgram, "color");
-        glUniform3fv(colorLoc, 1, glm::value_ptr(color));
 
-        // **Combine translation and scaling into the model matrix**
+        // Create model matrix
         glm::mat4 model = glm::translate(glm::mat4(1.0f), position);
-        float scaledRadius = size * NANOMETER_TO_WORLD_SCALE;
-        model = glm::scale(model, glm::vec3(scaledRadius));
+        model = glm::scale(model, glm::vec3(size * NANOMETER_TO_WORLD_SCALE));
 
-        // Set the model uniform
+        // Set uniforms
         GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+        GLint colorLoc = glGetUniformLocation(shaderProgram, "color");
+        glUniform3fv(colorLoc, 1, glm::value_ptr(color));
 
         // Draw the molecule as a sphere
         drawSphere();
@@ -680,6 +806,9 @@ void renderText(const std::string &text, float x, float y, float scale, glm::vec
     // Initialize cursor position
     float x_cursor = x;
 
+    // Increase the text scale (adjust as needed)
+    scale *= 1.5f;
+
     // Iterate over all characters
     std::string::const_iterator c;
     for (c = text.begin(); c != text.end(); c++) {
@@ -719,11 +848,13 @@ void renderText(const std::string &text, float x, float y, float scale, glm::vec
     }
 
     // Re-enable depth testing and disable blending after text rendering
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST); // Ensure depth testing is re-enabled
+
+    glUseProgram(0); // Optional: unbind any shader program
 }
 
 void cleanupVisualization() {

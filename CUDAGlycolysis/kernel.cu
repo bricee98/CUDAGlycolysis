@@ -67,7 +67,7 @@ __global__ void assignMoleculesToCells(Molecule* molecules, int num_molecules, C
             cells[cellIndex].moleculeIndices[offset] = idx;
         } else {
             // Handle overflow (e.g., ignore or handle in another way)
-            printf("Overflow detected in cell %d: offset=%d exceeds MAX_MOLECULES_PER_CELL=%d\n", cellIndex, offset, MAX_MOLECULES_PER_CELL);
+            //printf("Overflow detected in cell %d: offset=%d exceeds MAX_MOLECULES_PER_CELL=%d\n", cellIndex, offset, MAX_MOLECULES_PER_CELL);
             // Optionally, you can implement additional handling here
         }
     }
@@ -194,8 +194,8 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
 
     // Confirm thread index and number of molecules
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        printf("handleInteractions kernel launched with %d threads\n", gridDim.x * blockDim.x);
-        printf("Number of molecules: %d\n", *num_molecules);
+        //printf("handleInteractions kernel launched with %d threads\n", gridDim.x * blockDim.x);
+        //printf("Number of molecules: %d\n", *num_molecules);
     }
 
     if (idx >= *num_molecules) return;
@@ -387,26 +387,26 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
         double gamma = 6.0 * 3.14159265358979323846 * mol.radius * VISCOSITY;
 
         if (idx == 0) {
-            printf("gamma: %e\n", gamma);
+            //printf("gamma: %e\n", gamma);
         }
 
         double D = (K_BOLTZMANN * TEMPERATURE) / gamma; // nm^2/s
         if (idx == 0) {
-            printf("D: %e\n", D);
+            //printf("D: %e\n", D);
         }
 
         // Convert D to nm^2/s accounting for 1 m2 = 1e18 nm2
         D *= 1e18;
 
         if (idx == 0) {
-            printf("D converted: %e\n", D);
+            //printf("D converted: %e\n", D);
         }
 
         // Convert D to nm^2/μs accounting for 1 μs = 1e-6 s
         D *= 1e-6;
 
         if (idx == 0) {
-            printf("D final converted: %e\n", D);
+            //printf("D final converted: %e\n", D);
         }
 
         // Random displacement due to Brownian motion
@@ -414,7 +414,7 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
         double sqrtTerm = sqrt(2.0 * D * 1); // D in nm^2/μs, dt in μs
 
         if (idx == 0) {
-            printf("sqrtTerm: %e\n", sqrtTerm);
+            //printf("sqrtTerm: %e\n", sqrtTerm);
         }
 
         double3 randomDisplacement;
@@ -423,7 +423,7 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
         randomDisplacement.z = curand_normal(&localState) * sqrtTerm;
 
         if (idx == 0) {
-            printf("randomDisplacement: %e, %e, %e\n", randomDisplacement.x, randomDisplacement.y, randomDisplacement.z);
+            //printf("randomDisplacement: %e, %e, %e\n", randomDisplacement.x, randomDisplacement.y, randomDisplacement.z);
         }
 
         // Update position
@@ -447,8 +447,8 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
         randStates[idx] = localState;
 
         if (idx == 0) {
-            printf("gamma: %e\n", gamma);
-            printf("D: %e\n", D);
+            //printf("gamma: %e\n", gamma);
+            //printf("D: %e\n", D);
         }
     }
 }
