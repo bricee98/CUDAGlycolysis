@@ -395,16 +395,23 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
             printf("D: %e\n", D);
         }
 
-        // Convert D to nm^2/μs accounting for 1 μs = 1e-6 s and 1 m2 = 1e18 nm2
-        D *= 1e-6 * 1e18;
+        // Convert D to nm^2/s accounting for 1 m2 = 1e18 nm2
+        D *= 1e18;
 
         if (idx == 0) {
             printf("D converted: %e\n", D);
         }
 
+        // Convert D to nm^2/μs accounting for 1 μs = 1e-6 s
+        D *= 1e-6;
+
+        if (idx == 0) {
+            printf("D final converted: %e\n", D);
+        }
+
         // Random displacement due to Brownian motion
         curandState localState = randStates[idx];
-        double sqrtTerm = sqrt(2.0 * D * dt);
+        double sqrtTerm = sqrt(2.0 * D * 1); // D in nm^2/μs, dt in μs
 
         if (idx == 0) {
             printf("sqrtTerm: %e\n", sqrtTerm);
