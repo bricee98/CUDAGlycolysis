@@ -7,11 +7,17 @@
 #define MAX_MOLECULE_TYPES 15
 
 // SimulationSpace structure
+#pragma once
+
 struct SimulationSpace {
-    int width, height, depth;
-    int num_molecules;
+    float width;
+    float height;
+    float depth;
+    int gridSizeX;
+    int gridSizeY;
+    int gridSizeZ;
+    int num_molecules;        // Added this line
     int num_molecule_types;
     int molecule_counts[MAX_MOLECULE_TYPES];
 };
-
 #endif // SIMULATION_SPACE_H

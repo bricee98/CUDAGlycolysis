@@ -13,38 +13,57 @@ enum AtomType {
 
 class Atom {
 public:
-    // Add default constructor
-    Atom();
-    
-    // Existing constructor
-    Atom(AtomType type, float x, float y, float z, float charge, float mass);
-
-    // Getters
-    __host__ __device__ AtomType getType() const { return type; }
-    __host__ __device__ float getX() const { return x; }
-    __host__ __device__ float getY() const { return y; }
-    __host__ __device__ float getZ() const { return z; }
-    __host__ __device__ float getCharge() const { return charge; }
-    __host__ __device__ float getMass() const { return mass; }
-    __host__ __device__ float getVanDerWaalsRadius() const { return vanDerWaalsRadius; }
-    __host__ __device__ float getEpsilon() const { return epsilon; }
-    __host__ __device__ float getBornRadius() const { return bornRadius; }
-    __host__ __device__ float getInverseBornRadius() const { return inverseBornRadius; }
-
-    // Setters
-    __host__ __device__ void setPosition(float newX, float newY, float newZ);
-    __host__ __device__ void setBornRadius(float newBornRadius);
-    __host__ __device__ void setInverseBornRadius(float newInverseBornRadius);
-
-private:
+    // Member variables
     AtomType type;
     float x, y, z;
     float charge;
     float mass;
     float vanDerWaalsRadius;
-    float epsilon;  // Lennard-Jones well depth
+    float epsilon;       // Lennard-Jones parameter
     float bornRadius;
-    float inverseBornRadius;
 
-    void initializeAtomProperties();
+    // Constructors
+    __host__ Atom() : type(HYDROGEN), x(0), y(0), z(0), charge(0), mass(1.008f) {
+        initializeProperties();
+    }
+
+    __host__ Atom(AtomType t, float xPos, float yPos, float zPos, float q, float m)
+        : type(t), x(xPos), y(yPos), z(zPos), charge(q), mass(m) {
+        initializeProperties();
+    }
+
+private:
+    void initializeProperties() {
+        switch (type) {
+            case HYDROGEN:
+                vanDerWaalsRadius = 1.2f;
+                epsilon = 0.0157f;
+                break;
+            case CARBON:
+                vanDerWaalsRadius = 1.7f;
+                epsilon = 0.0860f;
+                break;
+            case NITROGEN:
+                vanDerWaalsRadius = 1.55f;
+                epsilon = 0.1700f;
+                break;
+            case OXYGEN:
+                vanDerWaalsRadius = 1.52f;
+                epsilon = 0.2100f;
+                break;
+            case PHOSPHORUS:
+                vanDerWaalsRadius = 1.8f;
+                epsilon = 0.2000f;
+                break;
+            case SULFUR:
+                vanDerWaalsRadius = 1.8f;
+                epsilon = 0.2500f;
+                break;
+            default:
+                vanDerWaalsRadius = 1.5f;
+                epsilon = 0.1000f;
+                break;
+        }
+        bornRadius = vanDerWaalsRadius; // Initial estimate
+    }
 };
