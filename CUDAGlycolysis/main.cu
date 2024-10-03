@@ -18,11 +18,14 @@
 #include <chrono>
 #include <numeric>
 #include <fstream>
+#include <algorithm>
+#include <vector>
+#include <cassert>
 
 std::ofstream logFile("performance_log.txt");
 
 // Define constants
-#define MAX_MOLECULES 20000
+#define MAX_MOLECULES 200000
 #define MAX_MOLECULE_TYPES 33
 
 // Constants for force calculations
@@ -88,6 +91,27 @@ const char* getMoleculeTypeName(MoleculeType type) {
         case AMP: return "AMP";
         case CITRATE: return "CITRATE";
         case FRUCTOSE_2_6_BISPHOSPHATE: return "FRUCTOSE_2_6_BISPHOSPHATE";
+        case HEXOKINASE_GLUCOSE_COMPLEX: return "HEXOKINASE_GLUCOSE_COMPLEX";
+        case HEXOKINASE_GLUCOSE_ATP_COMPLEX: return "HEXOKINASE_GLUCOSE_ATP_COMPLEX";
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return "GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX";
+        case FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return "FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX";
+        case PHOSPHOFRUCTOKINASE_1_COMPLEX: return "PHOSPHOFRUCTOKINASE_1_COMPLEX";
+        case PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX: return "PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX";
+        case FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX: return "FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX";
+        case DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return "DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX";
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX: return "GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX";
+        case PHOSPHOGLYCERATE_KINASE_COMPLEX: return "PHOSPHOGLYCERATE_KINASE_COMPLEX";
+        case PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX: return "PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX";
+        case PHOSPHOGLYCERATE_MUTASE_COMPLEX: return "PHOSPHOGLYCERATE_MUTASE_COMPLEX";
+        case ENOLASE_COMPLEX: return "ENOLASE_COMPLEX";
+        case PYRUVATE_KINASE_COMPLEX: return "PYRUVATE_KINASE_COMPLEX";
+        case PYRUVATE_KINASE_ADP_COMPLEX: return "PYRUVATE_KINASE_ADP_COMPLEX";
+        case NONE: return "NONE";
         default: return "UNKNOWN";
     }
 }
@@ -96,75 +120,66 @@ const char* getMoleculeTypeName(MoleculeType type) {
 Molecule createMolecule(MoleculeType type) {
     switch (type) {
         // Substrates and products
-        case GLUCOSE:
-            return Molecule::createGlucose();
-        case ATP:
-            return Molecule::createATP();
-        case ADP:
-            return Molecule::createADP();
-        case GLUCOSE_6_PHOSPHATE:
-            return Molecule::createGlucose6Phosphate();
-        case FRUCTOSE_6_PHOSPHATE:
-            return Molecule::createFructose6Phosphate();
-        case FRUCTOSE_1_6_BISPHOSPHATE:
-            return Molecule::createFructose16Bisphosphate();
-        case DIHYDROXYACETONE_PHOSPHATE:
-            return Molecule::createDihydroxyacetonePhosphate();
-        case GLYCERALDEHYDE_3_PHOSPHATE:
-            return Molecule::createGlyceraldehyde3Phosphate();
-        case _1_3_BISPHOSPHOGLYCERATE:
-            return Molecule::create13Bisphosphoglycerate();
-        case _3_PHOSPHOGLYCERATE:
-            return Molecule::create3Phosphoglycerate();
-        case _2_PHOSPHOGLYCERATE:
-            return Molecule::create2Phosphoglycerate();
-        case PHOSPHOENOLPYRUVATE:
-            return Molecule::createPhosphoenolpyruvate();
-        case PYRUVATE:
-            return Molecule::createPyruvate();
-        case NAD_PLUS:
-            return Molecule::createNADPlus();
-        case NADH:
-            return Molecule::createNADH();
-        case PROTON:
-            return Molecule::createProton();
-        case INORGANIC_PHOSPHATE:
-            return Molecule::createInorganicPhosphate();
-        case WATER:
-            return Molecule::createWater();
+        case GLUCOSE: return Molecule::createGlucose();
+        case ATP: return Molecule::createATP();
+        case ADP: return Molecule::createADP();
+        case GLUCOSE_6_PHOSPHATE: return Molecule::createGlucose6Phosphate();
+        case FRUCTOSE_6_PHOSPHATE: return Molecule::createFructose6Phosphate();
+        case FRUCTOSE_1_6_BISPHOSPHATE: return Molecule::createFructose16Bisphosphate();
+        case DIHYDROXYACETONE_PHOSPHATE: return Molecule::createDihydroxyacetonePhosphate();
+        case GLYCERALDEHYDE_3_PHOSPHATE: return Molecule::createGlyceraldehyde3Phosphate();
+        case _1_3_BISPHOSPHOGLYCERATE: return Molecule::create13Bisphosphoglycerate();
+        case _3_PHOSPHOGLYCERATE: return Molecule::create3Phosphoglycerate();
+        case _2_PHOSPHOGLYCERATE: return Molecule::create2Phosphoglycerate();
+        case PHOSPHOENOLPYRUVATE: return Molecule::createPhosphoenolpyruvate();
+        case PYRUVATE: return Molecule::createPyruvate();
+        case NAD_PLUS: return Molecule::createNADPlus();
+        case NADH: return Molecule::createNADH();
+        case PROTON: return Molecule::createProton();
+        case INORGANIC_PHOSPHATE: return Molecule::createInorganicPhosphate();
+        case WATER: return Molecule::createWater();
+        case AMP: return Molecule::createAMP();
+        case CITRATE: return Molecule::createCitrate();
+        case FRUCTOSE_2_6_BISPHOSPHATE: return Molecule::createFructose26Bisphosphate();
 
         // Enzymes
-        case HEXOKINASE:
-            return Molecule::createHexokinase();
-        case PHOSPHOGLUCOSE_ISOMERASE:
-            return Molecule::createGlucose6PhosphateIsomerase();
-        case PHOSPHOFRUCTOKINASE_1:
-            return Molecule::createPhosphofructokinase1();
-        case ALDOLASE:
-            return Molecule::createAldolase();
-        case TRIOSEPHOSPHATE_ISOMERASE:
-            return Molecule::createTriosephosphateIsomerase();
-        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE:
-            return Molecule::createGlyceraldehyde3PhosphateDehydrogenase();
-        case PHOSPHOGLYCERATE_KINASE:
-            return Molecule::createPhosphoglycerateKinase();
-        case PHOSPHOGLYCERATE_MUTASE:
-            return Molecule::createPhosphoglycerateMutase();
-        case ENOLASE:
-            return Molecule::createEnolase();
-        case PYRUVATE_KINASE:
-            return Molecule::createPyruvateKinase();
+        case HEXOKINASE: return Molecule::createHexokinase();
+        case PHOSPHOGLUCOSE_ISOMERASE: return Molecule::createGlucose6PhosphateIsomerase();
+        case PHOSPHOFRUCTOKINASE_1: return Molecule::createPhosphofructokinase1();
+        case ALDOLASE: return Molecule::createAldolase();
+        case TRIOSEPHOSPHATE_ISOMERASE: return Molecule::createTriosephosphateIsomerase();
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE: return Molecule::createGlyceraldehyde3PhosphateDehydrogenase();
+        case PHOSPHOGLYCERATE_KINASE: return Molecule::createPhosphoglycerateKinase();
+        case PHOSPHOGLYCERATE_MUTASE: return Molecule::createPhosphoglycerateMutase();
+        case ENOLASE: return Molecule::createEnolase();
+        case PYRUVATE_KINASE: return Molecule::createPyruvateKinase();
 
-        // Regulatory molecules
-        case AMP:
-            return Molecule::createAMP();
-        case CITRATE:
-            return Molecule::createCitrate();
-        case FRUCTOSE_2_6_BISPHOSPHATE:
-            return Molecule::createFructose26Bisphosphate();
+        // Enzyme complexes
+        case HEXOKINASE_GLUCOSE_COMPLEX: return Molecule::createHexokinaseGlucoseComplex();
+        case HEXOKINASE_GLUCOSE_ATP_COMPLEX: return Molecule::createHexokinaseGlucoseATPComplex();
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return Molecule::createGlucose6PhosphateIsomeraseComplex();
+        case FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return Molecule::createFructose6PhosphateIsomeraseComplex();
+        case PHOSPHOFRUCTOKINASE_1_COMPLEX: return Molecule::createPhosphofructokinase1Complex();
+        case PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX: return Molecule::createPhosphofructokinase1ATPComplex();
+        case FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX: return Molecule::createFructose16BisphosphateAldolaseComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateAldolaseComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateAldolaseDHAPComplex();
+        case DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return Molecule::createDHAPTriosephosphateIsomeraseComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateTriosephosphateIsomeraseComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateDehydrogenaseComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateDehydrogenaseNADPlusComplex();
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX: return Molecule::createGlyceraldehyde3PhosphateDehydrogenaseNADPlusInorganicPhosphateComplex();
+        case PHOSPHOGLYCERATE_KINASE_COMPLEX: return Molecule::createPhosphoglycerateKinaseComplex();
+        case PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX: return Molecule::createPhosphoglycerateKinaseADPComplex();
+        case PHOSPHOGLYCERATE_MUTASE_COMPLEX: return Molecule::createPhosphoglycerateMutaseComplex();
+        case ENOLASE_COMPLEX: return Molecule::createEnolaseComplex();
+        case PYRUVATE_KINASE_COMPLEX: return Molecule::createPyruvateKinaseComplex();
+        case PYRUVATE_KINASE_ADP_COMPLEX: return Molecule::createPyruvateKinaseADPComplex();
+
+        case NONE: return Molecule::createNone();
 
         default:
-            fprintf(stderr, "Unknown molecule type\n");
+            fprintf(stderr, "Unknown molecule type: %d\n", type);
             return Molecule::createWater();  // Default case, could also throw an exception
     }
 }
@@ -175,31 +190,38 @@ void processCreationDeletionFlags(Molecule* molecules, int* num_molecules, int m
                                   const int* deletionBuffer, int numDeletions) {
     // Process deletions
     if (deletionBuffer && numDeletions > 0) {
+        std::vector<int> deletionIndices(deletionBuffer, deletionBuffer + numDeletions);
+        std::sort(deletionIndices.begin(), deletionIndices.end(), std::greater<int>());
         for (int i = 0; i < numDeletions; i++) {
-            int indexToDelete = deletionBuffer[i];
-            if (indexToDelete < *num_molecules - 1) {
+            int indexToDelete = deletionIndices[i];
+            assert(indexToDelete >= 0 && indexToDelete < *num_molecules); // Ensure valid index
+            if (indexToDelete != *num_molecules - 1) {
                 molecules[indexToDelete] = molecules[*num_molecules - 1];
             }
             (*num_molecules)--;
+            //printf("Successfully deleted molecule at index %d\n", indexToDelete);
         }
     }
 
     // Process creations
     if (creationBuffer && numCreations > 0) {
         for (int i = 0; i < numCreations; i++) {
-            if (*num_molecules < max_molecules) {
-                Molecule newMolecule = createMolecule(creationBuffer[i].type);
-                newMolecule.centerOfMass = make_float3(creationBuffer[i].x, creationBuffer[i].y, creationBuffer[i].z);
-                molecules[*num_molecules] = newMolecule;
-                (*num_molecules)++;
-            }
+            assert(*num_molecules < max_molecules); // Ensure we don't exceed max molecules
+            Molecule newMolecule = createMolecule(creationBuffer[i].type);
+            //printf("Created molecule of type %s\n", getMoleculeTypeName(newMolecule.type));
+            newMolecule.centerOfMass = make_float3(creationBuffer[i].x, creationBuffer[i].y, creationBuffer[i].z);
+            molecules[*num_molecules] = newMolecule;
+            (*num_molecules)++;
+            //printf("Successfully added molecule to molecules array\n");
         }
     }
 }
 
 // Modify the runSimulation function to use runSimulationStep
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks) {
-    //printf("Starting simulation with %d molecules for %d ticks\n", space->num_molecules, num_ticks);
+    assert(space != nullptr); // Ensure space is not null
+    assert(molecules != nullptr); // Ensure molecules array is not null
+    assert(num_ticks > 0); // Ensure there is at least one tick
 
     cudaError_t cudaStatus;
 
@@ -309,6 +331,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     }
     t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> memoryAllocationTime = t2 - t1;
+    //printf("Successfully allocated memory\n");
 
     // Timing: Memory copy to device
     cudaEventRecord(start);
@@ -330,6 +353,8 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
 
+    //printf("Successfully set memory to 0\n");
+
     // Timing: Assign molecules to cells kernel
     cudaEventRecord(start);
     dim3 gridAssign((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock);
@@ -338,7 +363,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float assignMoleculesTime;
     cudaEventElapsedTime(&assignMoleculesTime, start, stop);
-
+    //printf("Successfully assigned molecules to cells\n");
     // Timing: Apply forces and update positions kernel
     cudaEventRecord(start);
     float dt = 1e-6f; // Timestep of 1 microsecond
@@ -348,7 +373,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float applyForcesTime;
     cudaEventElapsedTime(&applyForcesTime, start, stop);
-
+    //printf("Successfully applied forces and updated positions\n");
     // Timing: handle binding reactions kernel
     cudaEventRecord(start);
     handleBindings<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
@@ -358,7 +383,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float handleBindingsTime;
     cudaEventElapsedTime(&handleBindingsTime, start, stop);
-
+    //printf("Successfully handled bindings\n");
     // Timing: Memory copy from device to host
     cudaEventRecord(start);
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
@@ -370,7 +395,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float memcpyFromDeviceTime;
     cudaEventElapsedTime(&memcpyFromDeviceTime, start, stop);
-
+    //printf("Successfully copied molecules from device to host\n");
     // Timing: Process creation and deletion flags
     t1 = std::chrono::high_resolution_clock::now();
     int h_numCreations, h_numDeletions;
@@ -390,19 +415,21 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         cudaMemcpy(h_deletionBuffer, dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
     }
 
+    //printf("Successfully first copied creation and deletion buffers from device to host\n");
+
     processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES,
                                  h_creationBuffer, h_numCreations,
                                  h_deletionBuffer, h_numDeletions);
 
-    if (h_creationBuffer) delete[] h_creationBuffer;
-    if (h_deletionBuffer) delete[] h_deletionBuffer;
 
     t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> processFlagsTime = t2 - t1;
-
+    //printf("Successfully processed creation and deletion flags\n");
     // Reset the creation and deletion buffers
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
+
+    //printf("Successfully reset creation and deletion buffer counters\n");
 
     // Timing: copy molecules back to device
     cudaEventRecord(start);
@@ -415,7 +442,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float secondMemcpyToDeviceTime;
     cudaEventElapsedTime(&secondMemcpyToDeviceTime, start, stop);
-
+    //printf("Successfully copied molecules back to device\n");
     // Timing: handle reactions and dissociations
     t1 = std::chrono::high_resolution_clock::now();
     handleReactionsAndDissociations<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
@@ -425,7 +452,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float handleReactionsTime;
     cudaEventElapsedTime(&handleReactionsTime, start, stop);
-
+    //printf("Successfully handled reactions and dissociations\n");
     // Timing: copy molecules back to host
     cudaEventRecord(start);
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
@@ -437,11 +464,13 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventSynchronize(stop);
     float secondMemcpyFromDeviceTime;
     cudaEventElapsedTime(&secondMemcpyFromDeviceTime, start, stop);
-
+    //printf("Successfully copied molecules back to host\n");
     // Timing: process creation and deletion flags again
     t1 = std::chrono::high_resolution_clock::now();
     cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
+
+    //printf("Successfully copied creation and deletion buffers from device to host\n");
 
     if (h_numCreations > 0) {
         h_creationBuffer = new MoleculeCreationInfo[h_numCreations];
@@ -453,6 +482,8 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         cudaMemcpy(h_deletionBuffer, dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
     }
 
+    //printf("Successfully second copied creation and deletion buffers from device to host\n");
+
     processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES,
                                  h_creationBuffer, h_numCreations,
                                  h_deletionBuffer, h_numDeletions);
@@ -463,19 +494,21 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> secondProcessFlagsTime = t2 - t1;
 
+    //printf("Successfully processed creation and deletion flags\n");
+
     // Print timing results
-    printf("Simulation Step Timings:\n");
-    printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
-    printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
-    printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
-    printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
-    printf("  Handle Bindings: %.3f ms\n", handleBindingsTime);
-    printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
-    printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
-    printf("  Memory Copy to Device: %.3f ms\n", secondMemcpyToDeviceTime);
-    printf("  Handle Reactions and Dissociations: %.3f ms\n", handleReactionsTime);
-    printf("  Memory Copy from Device: %.3f ms\n", secondMemcpyFromDeviceTime);
-    printf("  Process Creation/Deletion Flags: %.3f ms\n", secondProcessFlagsTime.count());
+    //printf("Simulation Step Timings:\n");
+    //printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
+    //printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
+    //printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
+    //printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
+    //printf("  Handle Bindings: %.3f ms\n", handleBindingsTime);
+    //printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
+    //printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
+    //printf("  Memory Copy to Device: %.3f ms\n", secondMemcpyToDeviceTime);
+    //printf("  Handle Reactions and Dissociations: %.3f ms\n", handleReactionsTime);
+    //printf("  Memory Copy from Device: %.3f ms\n", secondMemcpyFromDeviceTime);
+    //printf("  Process Creation/Deletion Flags: %.3f ms\n", secondProcessFlagsTime.count());
 
     // Clean up CUDA events
     cudaEventDestroy(start);
@@ -586,10 +619,7 @@ int main() {
 
     // Allocate memory for molecules
     molecules = (Molecule*)malloc(MAX_MOLECULES * sizeof(Molecule));
-    if (molecules == nullptr) {
-        fprintf(stderr, "Failed to allocate memory for molecules\n");
-        return 1;
-    }
+    assert(molecules != nullptr); // Ensure memory allocation was successful
 
     //printf("Molecules allocated successfully\n");
 
@@ -670,10 +700,10 @@ int main() {
         std::chrono::duration<double, std::milli> loopTime = loopEnd - loopStart;
         std::chrono::duration<double, std::milli> renderTime = renderEnd - renderStart;
 
-        printf("Frame Timings:\n");
-        printf("  Total Loop Time: %.3f ms\n", loopTime.count());
-        printf("  Render Time: %.3f ms\n", renderTime.count());
-        printf("  Simulation Time: %.3f ms\n", loopTime.count() - renderTime.count());
+        //printf("Frame Timings:\n");
+        //printf("  Total Loop Time: %.3f ms\n", loopTime.count());
+        //printf("  Render Time: %.3f ms\n", renderTime.count());
+        //printf("  Simulation Time: %.3f ms\n", loopTime.count() - renderTime.count());
     }
 
     // Cleanup

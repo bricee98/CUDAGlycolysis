@@ -26,8 +26,8 @@ int h_GRID_SIZE_Z = 10;
 #define ENZYME_CATALYSIS_FACTOR 1e8
 #define NUM_REACTION_TYPES 10
 
-#define DISSOCIATION_PROBABILITY 0.01
-#define REACTION_PROBABILITY 0.01
+#define DISSOCIATION_PROBABILITY 0.0001
+#define REACTION_PROBABILITY 0.1
 // Constants for force calculations
 #define COULOMB_CONSTANT 138.935458      // Keep as double by default
 #define CUTOFF_DISTANCE 10.0f  // nm
@@ -400,8 +400,12 @@ __device__ void processBindingReaction(Molecule* molecules, int* numDeletions, i
     int idx1, int idx2, MoleculeType product1, MoleculeType product2, MoleculeType product3 = NONE,
     float reactionProbability = 1.0f) {
 
+    printf("Processing binding reaction with reactants");
+
     // Check that the reaction proceeds
     if (curand_uniform(&states[idx1]) < 1- reactionProbability) return;
+
+    printf("Processing binding reaction successfully!\n");
 
     // Delete reactants
     int delIdx = atomicAdd(numDeletions, 2);
@@ -442,11 +446,13 @@ __global__ void handleBindings(Molecule* molecules, int* num_molecules, int max_
             if (mol1.type == GLUCOSE && mol2.type == HEXOKINASE) {
                 processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
                                 states, idx, j, HEXOKINASE_GLUCOSE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                printf("Creating HEXOKINASE_GLUCOSE_COMPLEX\n");
                 return;
             }
 
             // Hexokinase-Glucose Complex + ATP -> Hexokinase-Glucose-ATP Complex
             else if (mol1.type == HEXOKINASE_GLUCOSE_COMPLEX && mol2.type == ATP) {
+                printf("ATP with Hexokinase-Glucose Complex encountered\n");
                 processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
                                 states, idx, j, HEXOKINASE_GLUCOSE_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
                 return;
