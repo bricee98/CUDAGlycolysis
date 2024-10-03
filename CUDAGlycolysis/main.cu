@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <vector>
 #include <cassert>
+#include <conio.h>
 
 std::ofstream logFile("performance_log.txt");
 
@@ -37,9 +38,8 @@ std::ofstream logFile("performance_log.txt");
 #define TEMPERATURE 310.15f        // Temperature in Kelvin (37°C)
 #define SOLVENT_DIELECTRIC 78.5f   // Dielectric constant of water at 37°C
 
-// Update these constants at the top of the file
-#define MAX_THREADS_PER_BLOCK 1024
-#define MAX_BLOCKS 65535
+int g_threadsToUse;
+int g_blocksToUse;
 
 // Add these declarations
 extern int h_GRID_SIZE_X;
@@ -51,6 +51,9 @@ GLFWwindow* window;
 bool isPaused = false;
 
 float total_simulated_time = 0.0f;
+
+// Add this global variable at the top of main.cu
+bool isRenderingPaused = false;
 
 // Function prototypes
 cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_ticks);
@@ -253,7 +256,6 @@ cudaError_t runSimulation(SimulationSpace* space, Molecule* molecules, int num_t
 
 cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     static Molecule* dev_molecules = nullptr;
-    static float3* dev_forces = nullptr;
     static curandState* dev_states = nullptr;
     static int* dev_num_molecules = nullptr;
     static MoleculeCreationInfo* dev_creationBuffer = nullptr;
@@ -261,6 +263,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     static int* dev_deletionBuffer = nullptr;
     static int* dev_numDeletions = nullptr;
     static Cell* dev_cells = nullptr;
+    static Grid* dev_grid = nullptr;
 
     // Remove the extern variables and define grid sizes locally
     int gridSizeX = static_cast<int>(space->width / CELL_SIZE);
@@ -273,14 +276,16 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     grid.sizeZ = gridSizeZ;
 
     cudaError_t cudaStatus;
-    int threadsPerBlock = 256;
-    int blocksPerGrid = min((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock, MAX_BLOCKS);
-
-    // Ensure blocksPerGrid is at least 1
-    if (blocksPerGrid < 1) blocksPerGrid = 1;
+    int threadsPerBlock = g_threadsToUse;
+    int blocksPerGrid = g_blocksToUse;
 
     // Calculate total cells
     int totalCells = grid.sizeX * grid.sizeY * grid.sizeZ;
+
+    // Calculate how many blocks we can use to process each cell
+    int blocksPerCell = blocksPerGrid / totalCells;
+
+    dim3 gridAssign(blocksPerGrid, 1, 1);
 
     // CUDA event creation for GPU timing
     cudaEvent_t start, stop;
@@ -311,8 +316,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
             fprintf(stderr, "cudaMalloc failed for dev_molecules! Error: %s\n", cudaGetErrorString(cudaStatus));
             return cudaStatus;
         }
-        cudaStatus = cudaMalloc((void**)&dev_forces, MAX_MOLECULES * sizeof(float3));
-        if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_forces!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_states, MAX_MOLECULES * sizeof(curandState));
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_states!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_num_molecules, sizeof(int));
@@ -325,6 +328,8 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_deletionBuffer!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_numDeletions, sizeof(int));
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_numDeletions!\n"); return cudaStatus; }
+        cudaStatus = cudaMalloc((void**)&dev_grid, sizeof(Grid));
+        if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_grid!\n"); return cudaStatus; }
 
         // Initialize curandState
         initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
@@ -345,6 +350,11 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n");
         return cudaStatus;
     }
+    cudaStatus = cudaMemcpy(dev_grid, &grid, sizeof(Grid), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed for grid to dev_grid!\n");
+        return cudaStatus;
+    }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float memcpyToDeviceTime;
@@ -357,8 +367,8 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
 
     // Timing: Assign molecules to cells kernel
     cudaEventRecord(start);
-    dim3 gridAssign((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock);
-    assignMoleculesToCells<<<gridAssign, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_cells, *space, grid);
+    //dim3 gridAssign((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock);
+    assignMoleculesToCells<<<gridAssign, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_cells, *space, *dev_grid);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float assignMoleculesTime;
@@ -378,7 +388,8 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     cudaEventRecord(start);
     handleBindings<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
                                                       dev_creationBuffer, dev_numCreations,
-                                                      dev_deletionBuffer, dev_numDeletions);
+                                                      dev_deletionBuffer, dev_numDeletions,
+                                                      dev_cells, *dev_grid);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float handleBindingsTime;
@@ -497,18 +508,18 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     //printf("Successfully processed creation and deletion flags\n");
 
     // Print timing results
-    //printf("Simulation Step Timings:\n");
-    //printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
-    //printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
-    //printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
-    //printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
-    //printf("  Handle Bindings: %.3f ms\n", handleBindingsTime);
-    //printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
-    //printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
-    //printf("  Memory Copy to Device: %.3f ms\n", secondMemcpyToDeviceTime);
-    //printf("  Handle Reactions and Dissociations: %.3f ms\n", handleReactionsTime);
-    //printf("  Memory Copy from Device: %.3f ms\n", secondMemcpyFromDeviceTime);
-    //printf("  Process Creation/Deletion Flags: %.3f ms\n", secondProcessFlagsTime.count());
+    printf("Simulation Step Timings:\n");
+    printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
+    printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
+    printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
+    printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
+    printf("  Handle Bindings: %.3f ms\n", handleBindingsTime);
+    printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
+    printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
+    printf("  Memory Copy to Device: %.3f ms\n", secondMemcpyToDeviceTime);
+    printf("  Handle Reactions and Dissociations: %.3f ms\n", handleReactionsTime);
+    printf("  Memory Copy from Device: %.3f ms\n", secondMemcpyFromDeviceTime);
+    printf("  Process Creation/Deletion Flags: %.3f ms\n", secondProcessFlagsTime.count());
 
     // Clean up CUDA events
     cudaEventDestroy(start);
@@ -517,6 +528,7 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     total_simulated_time += dt;
 
     return cudaStatus;
+
 }
 
 // Main function
@@ -528,6 +540,9 @@ int main() {
         fprintf(stderr, "cudaGetDeviceProperties failed! Error: %s\n", cudaGetErrorString(cudaStatus));
         return 1;
     }
+
+    g_threadsToUse = deviceProp.maxThreadsPerBlock;
+    g_blocksToUse = deviceProp.maxGridSize[0];
 
     //printf("CUDA Device Properties:\n");
     //printf("  Device name: %s\n", deviceProp.name);
@@ -675,11 +690,13 @@ int main() {
     // Initialize visualization
     initVisualization();
 
+    std::chrono::high_resolution_clock::time_point simulationStepStart, simulationStepEnd;
 
     // Main simulation loop
     std::chrono::high_resolution_clock::time_point loopStart, loopEnd, renderStart, renderEnd;
     while (!glfwWindowShouldClose(window)) {
         loopStart = std::chrono::high_resolution_clock::now();
+        simulationStepStart = std::chrono::high_resolution_clock::now();
 
         if (!isPaused) {
             // Run a single step of the simulation
@@ -690,20 +707,38 @@ int main() {
             }
         }
 
+        simulationStepEnd = std::chrono::high_resolution_clock::now();
+
         renderStart = std::chrono::high_resolution_clock::now();
-        // Render the current state of the simulation
-        renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time, 1.0f);
+        if (!isRenderingPaused) {
+            // Render the current state of the simulation
+            renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time, 1.0f);
+        }
+        else {
+            if (_kbhit()) {  // Check if a key has been pressed
+                char ch = _getch();  // Get the pressed key
+                if (ch == 'r' || ch == 'R') {  // Check if the key is 'r' or 'R'
+                    isRenderingPaused = !isRenderingPaused;  // Toggle rendering pause state
+                    printf("Rendering %s\n", isRenderingPaused ? "paused" : "resumed");
+                }
+            }
+        }
         renderEnd = std::chrono::high_resolution_clock::now();
 
         loopEnd = std::chrono::high_resolution_clock::now();
-
         std::chrono::duration<double, std::milli> loopTime = loopEnd - loopStart;
+        std::chrono::duration<double, std::milli> simulationStepTime = simulationStepEnd - simulationStepStart;
         std::chrono::duration<double, std::milli> renderTime = renderEnd - renderStart;
+        if (!isPaused) {
+            printf("Total Loop Time: %.3f ms\n", loopTime.count());
+        }
+        if (!isPaused) {
+            printf("Simulation Step Time: %.3f ms\n", simulationStepTime.count());
+        }
+        if (!isPaused) {
+            printf("Render Time: %.3f ms\n", renderTime.count());
+        }
 
-        //printf("Frame Timings:\n");
-        //printf("  Total Loop Time: %.3f ms\n", loopTime.count());
-        //printf("  Render Time: %.3f ms\n", renderTime.count());
-        //printf("  Simulation Time: %.3f ms\n", loopTime.count() - renderTime.count());
     }
 
     // Cleanup

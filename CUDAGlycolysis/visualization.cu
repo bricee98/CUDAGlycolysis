@@ -163,10 +163,17 @@ struct Character {
 // A map to store glyphs for quick access
 std::map<GLchar, Character> Characters;
 
+// At the top of visualization.cu, add this declaration to access the variable from main.cu
+extern bool isRenderingPaused;
+
 // Function to handle key input
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
         isPaused = !isPaused;
+    }
+
+    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+        isRenderingPaused = !isRenderingPaused;
     }
 }
 
