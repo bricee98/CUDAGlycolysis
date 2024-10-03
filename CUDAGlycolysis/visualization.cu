@@ -69,64 +69,41 @@ const char* vertexShaderSource = R"(
     uniform mat4 model;
     uniform mat4 view;
     uniform mat4 projection;
-    
-    out vec3 FragPos;
-    out vec3 Normal;
+    uniform float pointSize;
     
     void main()
     {
-        // Calculate fragment position in world space
-        FragPos = vec3(model * vec4(aPos, 1.0));
-        
-        // Calculate normal vector
-        Normal = mat3(transpose(inverse(model))) * aPos;
-        
-        // Output vertex position
-        gl_Position = projection * view * vec4(FragPos, 1.0);
+        gl_Position = projection * view * model * vec4(aPos, 1.0);
+        gl_PointSize = pointSize;
     }
 )";
 
-// Update the fragment shader to include a glow effect
+// Update the fragment shader to include a more pronounced glow effect
 const char* fragmentShaderSource = R"(
     #version 330 core
-    in vec3 FragPos;
-    in vec3 Normal;
-    
     out vec4 FragColor;
     
     uniform vec3 color;
-    uniform vec3 viewPos;
     
     void main()
     {
-        // Ambient lighting
-        float ambientStrength = 0.3;
-        vec3 ambient = ambientStrength * color;
+        // Calculate distance from fragment to center of molecule
+        vec2 circCoord = 2.0 * gl_PointCoord - 1.0;
+        float dist = length(circCoord);
         
-        // Calculate the normal vector and light direction
-        vec3 norm = normalize(Normal);
-        vec3 lightDir = normalize(viewPos - FragPos);
+        // Core color
+        vec3 coreColor = color;
         
-        // Diffuse lighting
-        float diff = max(dot(norm, lightDir), 0.0);
-        vec3 diffuse = diff * color;
+        // Glow color (brighter version of core color)
+        vec3 glowColor = color * 2.0 + vec3(0.2);
         
-        // Specular lighting
-        float specularStrength = 0.5;
-        vec3 viewDir = normalize(viewPos - FragPos);
-        vec3 reflectDir = reflect(-lightDir, norm);
-        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
-        vec3 specular = specularStrength * spec * vec3(1.0);
+        // Mix core and glow based on distance
+        vec3 finalColor = mix(coreColor, glowColor, smoothstep(0.5, 1.0, dist));
         
-        // Combine all lighting components
-        vec3 result = ambient + diffuse + specular;
+        // Fade out alpha at the edges
+        float alpha = 1.0 - smoothstep(0.8, 1.0, dist);
         
-        // Add glow effect based on distance from the center
-        float distance = length(FragPos - viewPos);
-        float glow = 1.0 / (distance * 0.1);
-        result += vec3(glow);
-        
-        FragColor = vec4(result, 1.0);
+        FragColor = vec4(finalColor, alpha);
     }
 )";
 
@@ -703,7 +680,7 @@ void processInput(GLFWwindow* window, float deltaTime) {
 
 // Update the renderSimulation function
 void renderSimulation(const SimulationSpace& space, const std::vector<Molecule>& molecules, float total_simulated_time, float deltaTime) {
-    printf("Rendering simulation\n");
+    //printf("Rendering simulation\n");
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 

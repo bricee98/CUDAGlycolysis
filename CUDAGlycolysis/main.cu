@@ -15,8 +15,11 @@
 #include "visualization.h"
 #include "Cell.cuh"
 #include "SimulationData.h"
+#include <chrono>
+#include <numeric>
+#include <fstream>
 
-
+std::ofstream logFile("performance_log.txt");
 
 // Define constants
 #define MAX_MOLECULES 20000
@@ -249,8 +252,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     grid.sizeY = gridSizeY;
     grid.sizeZ = gridSizeZ;
 
-    //printf("Grid Sizes - X: %d, Y: %d, Z: %d\n", grid.sizeX, grid.sizeY, grid.sizeZ);
-
     cudaError_t cudaStatus;
     int threadsPerBlock = 256;
     int blocksPerGrid = min((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock, MAX_BLOCKS);
@@ -260,8 +261,17 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
 
     // Calculate total cells
     int totalCells = grid.sizeX * grid.sizeY * grid.sizeZ;
-    //printf("Total cells: %d\n", totalCells);
 
+    // CUDA event creation for GPU timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    // CPU timing variables
+    std::chrono::high_resolution_clock::time_point t1, t2;
+
+    // Timing: Memory allocation and initialization
+    t1 = std::chrono::high_resolution_clock::now();
     if (dev_cells == nullptr) {
         cudaStatus = cudaMalloc(&dev_cells, totalCells * sizeof(Cell));
         if (cudaStatus != cudaSuccess) {
@@ -301,160 +311,114 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         // Initialize curandState
         initCurand<<<blocksPerGrid, threadsPerBlock>>>(time(NULL), dev_states, space->num_molecules);
     }
+    t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> memoryAllocationTime = t2 - t1;
 
-
-    // available memory
-    size_t availableMemory;
-    cudaStatus = cudaMemGetInfo(&availableMemory, NULL);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemGetInfo failed! Error: %s\n", cudaGetErrorString(cudaStatus));
-        return cudaStatus;
-    }
-    //printf("Available memory: %zu bytes\n", availableMemory);
-
-    // Copy current state to device
+    // Timing: Memory copy to device
+    cudaEventRecord(start);
     cudaStatus = cudaMemcpy(dev_molecules, molecules, MAX_MOLECULES * sizeof(Molecule), cudaMemcpyHostToDevice);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed for molecules to dev_molecules! Error: %s\n", cudaGetErrorString(cudaStatus));
         return cudaStatus;
     }
-
-    //printf("Copied molecules to device\n");
-
     cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n"); return cudaStatus; }
-    //printf("Copied num_molecules to device\n");
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n");
+        return cudaStatus;
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float memcpyToDeviceTime;
+    cudaEventElapsedTime(&memcpyToDeviceTime, start, stop);
 
     cudaMemset(dev_reactionCounts, 0, NUM_REACTION_TYPES * sizeof(int));
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
-    //printf("Reset reaction counts, numCreations, and numDeletions\n");
-    // Assign molecules to cells
+
+    // Timing: Assign molecules to cells kernel
+    cudaEventRecord(start);
     dim3 gridAssign((space->num_molecules + threadsPerBlock - 1) / threadsPerBlock);
     assignMoleculesToCells<<<gridAssign, threadsPerBlock>>>(dev_molecules, space->num_molecules, dev_cells, *space, grid);
-    //printf("Assigned molecules to cells\n");
-    // Synchronize to ensure kernel execution completion and flush //printf output
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching assignMoleculesToCells kernel!\n", cudaStatus);
-        return cudaStatus;
-    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float assignMoleculesTime;
+    cudaEventElapsedTime(&assignMoleculesTime, start, stop);
 
-
-    // Reset forces
-    cudaMemset(dev_forces, 0, space->num_molecules * sizeof(float3));
-    //printf("Reset forces\n");
-    // Adjust the timestep for microsecond timescales
+    // Timing: Apply forces and update positions kernel
+    cudaEventRecord(start);
     float dt = 1e-6f; // Timestep of 1 microsecond
-
-    // Call applyForcesAndUpdatePositions with the new dt
     applyForcesAndUpdatePositions<<<blocksPerGrid, threadsPerBlock>>>(
         dev_molecules, space->num_molecules, *space, dt, dev_states);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float applyForcesTime;
+    cudaEventElapsedTime(&applyForcesTime, start, stop);
 
-    // Synchronize to ensure kernel execution completion and flush //printf output
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching applyForcesAndUpdatePositions kernel!\n", cudaStatus);
-        return cudaStatus;
-    }
-    //printf("Applied forces and updated positions\n");
-    // Handle interactions
+    // Timing: Handle interactions kernel
+    cudaEventRecord(start);
     handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
                                                            dev_reactionCounts, dev_creationBuffer, dev_numCreations,
                                                            dev_deletionBuffer, dev_numDeletions);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float handleInteractionsTime;
+    cudaEventElapsedTime(&handleInteractionsTime, start, stop);
 
-    // Check for errors during kernel launch
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Error after handleInteractions kernel launch: %s\n", cudaGetErrorString(err));
-        return err;
-    }
-
-    // Synchronize to ensure kernel execution completion and flush //printf output
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching handleInteractions kernel!\n", cudaStatus);
-        return cudaStatus;
-    }
-
-    // Copy the updated molecules back to the host
+    // Timing: Memory copy from device to host
+    cudaEventRecord(start);
     cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed for dev_molecules to molecules!\n");
         return cudaStatus;
     }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float memcpyFromDeviceTime;
+    cudaEventElapsedTime(&memcpyFromDeviceTime, start, stop);
 
-    //printf("Copied updated molecules to host\n");
-
-    //printf("Handled interactions\n");
-    // Copy the number of creations and deletions back to the host
+    // Timing: Process creation and deletion flags
+    t1 = std::chrono::high_resolution_clock::now();
     int h_numCreations, h_numDeletions;
     cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
-    //printf("Copied numCreations (%d) and numDeletions (%d) to host\n", h_numCreations, h_numDeletions);
 
-    // Allocate host buffers for creations and deletions
     MoleculeCreationInfo* h_creationBuffer = nullptr;
     int* h_deletionBuffer = nullptr;
 
     if (h_numCreations > 0) {
         h_creationBuffer = new MoleculeCreationInfo[h_numCreations];
-        // Copy creation buffer back to the host
         cudaMemcpy(h_creationBuffer, dev_creationBuffer, h_numCreations * sizeof(MoleculeCreationInfo), cudaMemcpyDeviceToHost);
-        //printf("Allocated and copied creation buffer to host\n");
     }
 
     if (h_numDeletions > 0) {
         h_deletionBuffer = new int[h_numDeletions];
-        // Copy deletion buffer back to the host
         cudaMemcpy(h_deletionBuffer, dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
-        //printf("Allocated and copied deletion buffer to host\n");
     }
 
-    // Process creation and deletion flags
     processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES,
                                  h_creationBuffer, h_numCreations,
                                  h_deletionBuffer, h_numDeletions);
-    //printf("Processed creation and deletion flags\n");
 
-    // Free host buffers
-    if (h_creationBuffer) {
-        delete[] h_creationBuffer;
-    }
-    if (h_deletionBuffer) {
-        delete[] h_deletionBuffer;
-    }
-    //printf("Freed host buffers\n");
-    // Copy updated molecules back to the device
-    cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for molecules to dev_molecules!\n"); return cudaStatus; }
-    //printf("Copied updated molecules to device\n");
+    if (h_creationBuffer) delete[] h_creationBuffer;
+    if (h_deletionBuffer) delete[] h_deletionBuffer;
 
-    // Print the position of molecule 500
-    //printf("Host Molecule 500: Position (%f, %f, %f)\n", molecules[500].centerOfMass.x, molecules[500].centerOfMass.y, molecules[500].centerOfMass.z);
+    t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> processFlagsTime = t2 - t1;
 
-    cudaStatus = cudaMemcpy(dev_num_molecules, &space->num_molecules, sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for num_molecules to dev_num_molecules!\n"); return cudaStatus; }
-    //printf("Copied updated num_molecules to device\n");
-    // Check for errors
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        return cudaStatus;
-    }
-    //printf("Checked for errors\n");
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching kernels!\n", cudaStatus);
-        return cudaStatus;
-    }
-    //printf("Synchronized device\n");
-    // Copy updated molecules back to host
-    cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMemcpy failed for dev_molecules to molecules!\n"); return cudaStatus; }
-    //printf("Copied updated molecules to host\n");
+    // Print timing results
+    printf("Simulation Step Timings:\n");
+    printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
+    printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
+    printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
+    printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
+    printf("  Handle Interactions: %.3f ms\n", handleInteractionsTime);
+    printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
+    printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
 
-    // 4. Move the total_simulated_time update before the return statement
+    // Clean up CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
     total_simulated_time += dt;
 
     return cudaStatus;
@@ -619,8 +583,12 @@ int main() {
     // Initialize visualization
     initVisualization();
 
+
     // Main simulation loop
+    std::chrono::high_resolution_clock::time_point loopStart, loopEnd, renderStart, renderEnd;
     while (!glfwWindowShouldClose(window)) {
+        loopStart = std::chrono::high_resolution_clock::now();
+
         if (!isPaused) {
             // Run a single step of the simulation
             cudaStatus = runSimulationStep(&space, molecules);
@@ -630,8 +598,20 @@ int main() {
             }
         }
 
+        renderStart = std::chrono::high_resolution_clock::now();
         // Render the current state of the simulation
         renderSimulation(space, std::vector<Molecule>(molecules, molecules + space.num_molecules), total_simulated_time, 1.0f);
+        renderEnd = std::chrono::high_resolution_clock::now();
+
+        loopEnd = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double, std::milli> loopTime = loopEnd - loopStart;
+        std::chrono::duration<double, std::milli> renderTime = renderEnd - renderStart;
+
+        printf("Frame Timings:\n");
+        printf("  Total Loop Time: %.3f ms\n", loopTime.count());
+        printf("  Render Time: %.3f ms\n", renderTime.count());
+        printf("  Simulation Time: %.3f ms\n", loopTime.count() - renderTime.count());
     }
 
     // Cleanup
