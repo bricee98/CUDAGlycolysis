@@ -15,3 +15,5 @@ Simulation Step Timings:
   Handle Interactions: 11.970 ms
   Memory Copy from Device: 0.058 ms
   Process Creation/Deletion Flags: 0.024 ms
+
+![image](https://github.com/user-attachments/assets/49a140fe-c049-4b0c-bb02-7a15592f8444)
