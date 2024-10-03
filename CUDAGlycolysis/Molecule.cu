@@ -19,6 +19,10 @@ __host__ Molecule createCoarseGrainedMolecule(MoleculeType type, float radius, f
     return m;
 }
 
+__host__ Molecule Molecule::createNone() {
+    return createCoarseGrainedMolecule(NONE, 0.0f, 0.0f, 0.0f);
+}
+
 __host__ Molecule Molecule::createGlucose() {
     return createCoarseGrainedMolecule(GLUCOSE, 0.38f, 180.156f, 0.0f);
 }
@@ -118,7 +122,7 @@ __host__ Molecule Molecule::createHexokinase() {
 }
 
 __host__ Molecule Molecule::createGlucose6PhosphateIsomerase() {
-    return createCoarseGrainedEnzyme(GLUCOSE_6_PHOSPHATE_ISOMERASE, 4.8f, 95000.0f);
+    return createCoarseGrainedEnzyme(PHOSPHOGLUCOSE_ISOMERASE, 4.8f, 95000.0f);
 }
 
 __host__ Molecule Molecule::createPhosphofructokinase1() {
@@ -151,4 +155,94 @@ __host__ Molecule Molecule::createEnolase() {
 
 __host__ Molecule Molecule::createPyruvateKinase() {
     return createCoarseGrainedEnzyme(PYRUVATE_KINASE, 5.4f, 108000.0f);
+}
+
+// Helper function to create coarse-grained enzyme complexes
+__host__ Molecule createCoarseGrainedEnzymeComplex(MoleculeType type, float radius, float mass) {
+    Molecule m;
+    m.type = type;
+    m.radius = radius;
+    m.mass = mass;
+    m.centerOfMass = make_float3(0.0f, 0.0f, 0.0f);
+    return m;
+}
+
+__host__ Molecule Molecule::createHexokinaseGlucoseComplex() {
+    return createCoarseGrainedEnzymeComplex(HEXOKINASE_GLUCOSE_COMPLEX, 5.2f, 105000.0f);
+}
+
+__host__ Molecule Molecule::createHexokinaseGlucoseATPComplex() {
+    return createCoarseGrainedEnzymeComplex(HEXOKINASE_GLUCOSE_ATP_COMPLEX, 5.4f, 110000.0f);
+}
+
+__host__ Molecule Molecule::createGlucose6PhosphateIsomeraseComplex() {
+    return createCoarseGrainedEnzymeComplex(GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, 5.0f, 100000.0f);
+}
+
+__host__ Molecule Molecule::createFructose6PhosphateIsomeraseComplex() {
+    return createCoarseGrainedEnzymeComplex(FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, 5.0f, 100000.0f);
+}
+
+__host__ Molecule Molecule::createPhosphofructokinase1Complex() {
+    return createCoarseGrainedEnzymeComplex(PHOSPHOFRUCTOKINASE_1_COMPLEX, 5.3f, 106000.0f);
+}
+
+__host__ Molecule Molecule::createPhosphofructokinase1ATPComplex() {
+    return createCoarseGrainedEnzymeComplex(PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX, 5.5f, 111000.0f);
+}
+
+__host__ Molecule Molecule::createFructose16BisphosphateAldolaseComplex() {
+    return createCoarseGrainedEnzymeComplex(FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX, 5.2f, 104000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateAldolaseComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX, 5.2f, 104000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateAldolaseDHAPComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX, 5.3f, 106000.0f);
+}
+
+__host__ Molecule Molecule::createDHAPTriosephosphateIsomeraseComplex() {
+    return createCoarseGrainedEnzymeComplex(DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, 4.7f, 94000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateTriosephosphateIsomeraseComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, 4.7f, 94000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateDehydrogenaseComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, 5.4f, 108000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateDehydrogenaseNADPlusComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX, 5.5f, 110000.0f);
+}
+
+__host__ Molecule Molecule::createGlyceraldehyde3PhosphateDehydrogenaseNADPlusInorganicPhosphateComplex() {
+    return createCoarseGrainedEnzymeComplex(GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX, 5.6f, 112000.0f);
+}
+
+__host__ Molecule Molecule::createPhosphoglycerateKinaseComplex() {
+    return createCoarseGrainedEnzymeComplex(PHOSPHOGLYCERATE_KINASE_COMPLEX, 5.0f, 100000.0f);
+}
+
+__host__ Molecule Molecule::createPhosphoglycerateKinaseADPComplex() {
+    return createCoarseGrainedEnzymeComplex(PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX, 5.2f, 104000.0f);
+}
+
+__host__ Molecule Molecule::createPhosphoglycerateMutaseComplex() {
+    return createCoarseGrainedEnzymeComplex(PHOSPHOGLYCERATE_MUTASE_COMPLEX, 4.8f, 96000.0f);
+}
+
+__host__ Molecule Molecule::createEnolaseComplex() {
+    return createCoarseGrainedEnzymeComplex(ENOLASE_COMPLEX, 5.1f, 102000.0f);
+}
+
+__host__ Molecule Molecule::createPyruvateKinaseComplex() {
+    return createCoarseGrainedEnzymeComplex(PYRUVATE_KINASE_COMPLEX, 5.5f, 110000.0f);
+}
+
+__host__ Molecule Molecule::createPyruvateKinaseADPComplex() {
+    return createCoarseGrainedEnzymeComplex(PYRUVATE_KINASE_ADP_COMPLEX, 5.6f, 112000.0f);
 }

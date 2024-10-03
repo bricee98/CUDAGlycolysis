@@ -20,12 +20,14 @@ int h_GRID_SIZE_Z = 10;
 #include <cstdio>
 #include <assert.h>
 // Constants for interaction radius and reaction probabilities
-#define INTERACTION_RADIUS 5.0       // nm
+#define INTERACTION_RADIUS 1.0       // nm
 #define INTERACTION_RADIUS_SQ (INTERACTION_RADIUS * INTERACTION_RADIUS)
 #define BASE_REACTION_PROBABILITY 1e-6  // Adjusted for microsecond timescale
-#define ENZYME_CATALYSIS_FACTOR 100.0f
+#define ENZYME_CATALYSIS_FACTOR 1e8
 #define NUM_REACTION_TYPES 10
 
+#define DISSOCIATION_PROBABILITY 0.01
+#define REACTION_PROBABILITY 0.01
 // Constants for force calculations
 #define COULOMB_CONSTANT 138.935458      // Keep as double by default
 #define CUTOFF_DISTANCE 10.0f  // nm
@@ -169,15 +171,6 @@ __device__ bool checkEnzymePresence(Molecule* molecules, int num_molecules, cons
     return false;
 }
 
-// Helper function to check if a reaction should occur
-__device__ bool shouldReact(curandState* state, float baseProbability, bool enzymePresent) {
-    float reactionProbability = baseProbability;
-    if (enzymePresent) {
-        reactionProbability *= ENZYME_CATALYSIS_FACTOR;
-    }
-    return curand_uniform(state) < reactionProbability;
-}
-
 // Kernel to initialize curand states
 __global__ void initCurand(unsigned long long seed, curandState *state, int num_molecules) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -186,17 +179,255 @@ __global__ void initCurand(unsigned long long seed, curandState *state, int num_
     }
 }
 
-// Main interaction kernel
-__global__ void handleInteractions(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states,
-                                   int* reactionCounts, MoleculeCreationInfo* creationBuffer, int* numCreations,
+// Helper function to handle reactions and dissociations
+__device__ void handleComplexReaction(
+    Molecule* molecules, int idx, curandState* states,
+    MoleculeCreationInfo* creationBuffer, int* numCreations,
+    int* deletionBuffer, int* numDeletions,
+    MoleculeType complexType,
+    MoleculeType dissociation1, MoleculeType dissociation2, MoleculeType dissociation3,
+    MoleculeType reaction1, MoleculeType reaction2, MoleculeType reaction3,
+    float reactionProbability, float dissociationProbability
+) {
+    if (curand_uniform(&states[idx]) < reactionProbability) {
+        int delIdx = atomicAdd(numDeletions, 1);
+        deletionBuffer[delIdx] = idx;
+        
+        int createIdx = atomicAdd(numCreations, 1);
+        creationBuffer[createIdx] = {reaction1, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        
+        if (reaction2 != NONE) {
+            createIdx = atomicAdd(numCreations, 1);
+            creationBuffer[createIdx] = {reaction2, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        }
+        
+        if (reaction3 != NONE) {
+            createIdx = atomicAdd(numCreations, 1);
+            creationBuffer[createIdx] = {reaction3, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        }
+    }
+    else if (curand_uniform(&states[idx]) < dissociationProbability) {
+        int delIdx = atomicAdd(numDeletions, 1);
+        deletionBuffer[delIdx] = idx;
+        
+        int createIdx = atomicAdd(numCreations, 1);
+        creationBuffer[createIdx] = {dissociation1, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        
+        if (dissociation2 != NONE) {
+            createIdx = atomicAdd(numCreations, 1);
+            creationBuffer[createIdx] = {dissociation2, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        }
+        
+        if (dissociation3 != NONE) {
+            createIdx = atomicAdd(numCreations, 1);
+            creationBuffer[createIdx] = {dissociation3, molecules[idx].centerOfMass.x, molecules[idx].centerOfMass.y, molecules[idx].centerOfMass.z};
+        }
+    }
+}
+
+// Main kernel function
+__global__ void handleReactionsAndDissociations(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states,
+                                   MoleculeCreationInfo* creationBuffer, int* numCreations,
                                    int* deletionBuffer, int* numDeletions) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= *num_molecules) return;
 
-    // Confirm thread index and number of molecules
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        //printf("handleInteractions kernel launched with %d threads\n", gridDim.x * blockDim.x);
-        //printf("Number of molecules: %d\n", *num_molecules);
+    switch(molecules[idx].type) {
+        case HEXOKINASE_GLUCOSE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                HEXOKINASE_GLUCOSE_COMPLEX,
+                GLUCOSE, HEXOKINASE, NONE,
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case HEXOKINASE_GLUCOSE_ATP_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                HEXOKINASE_GLUCOSE_ATP_COMPLEX,
+                GLUCOSE, HEXOKINASE, ATP,
+                GLUCOSE_6_PHOSPHATE, HEXOKINASE, ADP,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, 
+                GLUCOSE_6_PHOSPHATE, PHOSPHOGLUCOSE_ISOMERASE, NONE,
+                FRUCTOSE_6_PHOSPHATE, PHOSPHOGLUCOSE_ISOMERASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX,
+                FRUCTOSE_6_PHOSPHATE, PHOSPHOGLUCOSE_ISOMERASE, NONE,
+                GLUCOSE_6_PHOSPHATE, PHOSPHOGLUCOSE_ISOMERASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PHOSPHOFRUCTOKINASE_1_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PHOSPHOFRUCTOKINASE_1_COMPLEX,
+                FRUCTOSE_6_PHOSPHATE, PHOSPHOFRUCTOKINASE_1, NONE, 
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX,
+                FRUCTOSE_6_PHOSPHATE, PHOSPHOFRUCTOKINASE_1, NONE,
+                FRUCTOSE_1_6_BISPHOSPHATE, PHOSPHOFRUCTOKINASE_1, ADP,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX,
+                FRUCTOSE_1_6_BISPHOSPHATE, ALDOLASE, NONE,
+                DIHYDROXYACETONE_PHOSPHATE, GLYCERALDEHYDE_3_PHOSPHATE, ALDOLASE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX,
+                GLYCERALDEHYDE_3_PHOSPHATE, ALDOLASE, NONE,
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX,
+                GLYCERALDEHYDE_3_PHOSPHATE, ALDOLASE, NONE,
+                FRUCTOSE_1_6_BISPHOSPHATE, ALDOLASE, DIHYDROXYACETONE_PHOSPHATE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX,
+                DIHYDROXYACETONE_PHOSPHATE, TRIOSEPHOSPHATE_ISOMERASE, NONE,
+                GLYCERALDEHYDE_3_PHOSPHATE, TRIOSEPHOSPHATE_ISOMERASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX,
+                GLYCERALDEHYDE_3_PHOSPHATE, TRIOSEPHOSPHATE_ISOMERASE, NONE,
+                DIHYDROXYACETONE_PHOSPHATE, TRIOSEPHOSPHATE_ISOMERASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX,
+                GLYCERALDEHYDE_3_PHOSPHATE, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE, NONE,
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX,
+                GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, NAD_PLUS, NONE,
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX, 
+                GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, NAD_PLUS, INORGANIC_PHOSPHATE,
+                _1_3_BISPHOSPHOGLYCERATE, NADH, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PHOSPHOGLYCERATE_KINASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PHOSPHOGLYCERATE_KINASE_COMPLEX,
+                _1_3_BISPHOSPHOGLYCERATE, PHOSPHOGLYCERATE_KINASE, NONE, 
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX,
+                _1_3_BISPHOSPHOGLYCERATE, PHOSPHOGLYCERATE_KINASE, NONE,
+                _3_PHOSPHOGLYCERATE, ATP, PHOSPHOGLYCERATE_KINASE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PHOSPHOGLYCERATE_MUTASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PHOSPHOGLYCERATE_MUTASE_COMPLEX,
+                _3_PHOSPHOGLYCERATE, PHOSPHOGLYCERATE_MUTASE, NONE,
+                _2_PHOSPHOGLYCERATE, PHOSPHOGLYCERATE_MUTASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case ENOLASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                ENOLASE_COMPLEX,
+                _2_PHOSPHOGLYCERATE, ENOLASE, NONE,
+                PHOSPHOENOLPYRUVATE, ENOLASE, NONE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PYRUVATE_KINASE_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PYRUVATE_KINASE_COMPLEX,
+                PHOSPHOENOLPYRUVATE, PYRUVATE_KINASE, NONE,
+                NONE, NONE, NONE, // No reaction products
+                0.0f, DISSOCIATION_PROBABILITY);
+            break;
+
+        case PYRUVATE_KINASE_ADP_COMPLEX:
+            handleComplexReaction(molecules, idx, states, creationBuffer, numCreations, deletionBuffer, numDeletions,
+                PYRUVATE_KINASE_ADP_COMPLEX,
+                PYRUVATE_KINASE_COMPLEX, ADP, NONE,
+                PYRUVATE, ATP, PYRUVATE_KINASE,
+                REACTION_PROBABILITY, DISSOCIATION_PROBABILITY);
+            break;
     }
+}
+
+__device__ void processBindingReaction(Molecule* molecules, int* numDeletions, int* numCreations, int* deletionBuffer, MoleculeCreationInfo* creationBuffer,
+    curandState* states,
+    int idx1, int idx2, MoleculeType product1, MoleculeType product2, MoleculeType product3 = NONE,
+    float reactionProbability = 1.0f) {
+
+    // Check that the reaction proceeds
+    if (curand_uniform(&states[idx1]) < 1- reactionProbability) return;
+
+    // Delete reactants
+    int delIdx = atomicAdd(numDeletions, 2);
+    deletionBuffer[delIdx] = idx1;
+    deletionBuffer[delIdx + 1] = idx2;
+
+    // Create products
+    int createIdx = atomicAdd(numCreations, 1);
+    creationBuffer[createIdx] = {product1, molecules[idx1].centerOfMass.x, molecules[idx1].centerOfMass.y, molecules[idx1].centerOfMass.z};
+
+    if (product2 != NONE) {
+        createIdx = atomicAdd(numCreations, 1);
+        creationBuffer[createIdx] = {product2, molecules[idx1].centerOfMass.x, molecules[idx1].centerOfMass.y, molecules[idx1].centerOfMass.z};
+    }
+
+    if (product3 != NONE) {
+        createIdx = atomicAdd(numCreations, 1);
+        creationBuffer[createIdx] = {product3, molecules[idx1].centerOfMass.x, molecules[idx1].centerOfMass.y, molecules[idx1].centerOfMass.z};
+    }
+}
+
+// Main interaction kernel
+__global__ void handleBindings(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states,
+                               MoleculeCreationInfo* creationBuffer, int* numCreations,
+                               int* deletionBuffer, int* numDeletions) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= *num_molecules) return;
 
@@ -207,169 +438,144 @@ __global__ void handleInteractions(Molecule* molecules, int* num_molecules, int 
         Molecule& mol2 = molecules[j];
 
         if (distanceSquared(mol1, mol2) <= INTERACTION_RADIUS_SQ) {
-            // Existing reaction: Glucose + ATP -> Glucose-6-Phosphate + ADP (Hexokinase)
-            if ((mol1.type == GLUCOSE && mol2.type == ATP) || (mol2.type == GLUCOSE && mol1.type == ATP)) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, HEXOKINASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 2);
-                    deletionBuffer[delIdx] = idx;
-                    deletionBuffer[delIdx + 1] = j;
-
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {GLUCOSE_6_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {ADP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[0], 1);
-                    return;
-                }
+            // Glucose + Hexokinase -> Hexokinase-Glucose Complex
+            if (mol1.type == GLUCOSE && mol2.type == HEXOKINASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, HEXOKINASE_GLUCOSE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Glucose-6-Phosphate -> Fructose-6-Phosphate (Glucose-6-Phosphate Isomerase)
-            else if (mol1.type == GLUCOSE_6_PHOSPHATE || mol2.type == GLUCOSE_6_PHOSPHATE) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, GLUCOSE_6_PHOSPHATE_ISOMERASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 1);
-                    deletionBuffer[delIdx] = (mol1.type == GLUCOSE_6_PHOSPHATE) ? idx : j;
-
-                    int createIdx = atomicAdd(numCreations, 1);
-                    creationBuffer[createIdx] = {FRUCTOSE_6_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[1], 1);
-                    return;
-                }
+            // Hexokinase-Glucose Complex + ATP -> Hexokinase-Glucose-ATP Complex
+            else if (mol1.type == HEXOKINASE_GLUCOSE_COMPLEX && mol2.type == ATP) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, HEXOKINASE_GLUCOSE_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Fructose-6-Phosphate + ATP -> Fructose-1,6-Bisphosphate + ADP (Phosphofructokinase-1)
-            else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == ATP) || (mol2.type == FRUCTOSE_6_PHOSPHATE && mol1.type == ATP)) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOFRUCTOKINASE_1);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 2);
-                    deletionBuffer[delIdx] = idx;
-                    deletionBuffer[delIdx + 1] = j;
-
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {FRUCTOSE_1_6_BISPHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {ADP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[2], 1);
-                    return;
-                }
+            // Glucose-6-Phosphate + Isomerase -> Glucose-6-Phosphate Isomerase Complex
+            else if (mol1.type == GLUCOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Fructose-1,6-Bisphosphate -> Dihydroxyacetone Phosphate + Glyceraldehyde-3-Phosphate (Aldolase)
-            else if (mol1.type == FRUCTOSE_1_6_BISPHOSPHATE || mol2.type == FRUCTOSE_1_6_BISPHOSPHATE) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, ALDOLASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 1);
-                    deletionBuffer[delIdx] = (mol1.type == FRUCTOSE_1_6_BISPHOSPHATE) ? idx : j;
-
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {DIHYDROXYACETONE_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {GLYCERALDEHYDE_3_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[3], 1);
-                    return;
-                }
+            // Fructose-6-Phosphate + Isomerase -> Fructose-6-Phosphate Isomerase Complex
+            else if (mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Dihydroxyacetone Phosphate -> Glyceraldehyde-3-Phosphate (Triosephosphate Isomerase)
-            else if (mol1.type == DIHYDROXYACETONE_PHOSPHATE || mol2.type == DIHYDROXYACETONE_PHOSPHATE) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, TRIOSEPHOSPHATE_ISOMERASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 1);
-                    deletionBuffer[delIdx] = (mol1.type == DIHYDROXYACETONE_PHOSPHATE) ? idx : j;
-
-                    int createIdx = atomicAdd(numCreations, 1);
-                    creationBuffer[createIdx] = {GLYCERALDEHYDE_3_PHOSPHATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[4], 1);
-                    return;
-                }
+            // Fructose-6-Phosphate + Phosphofructokinase-1 -> Phosphofructokinase-1 Complex
+            else if (mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOFRUCTOKINASE_1) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PHOSPHOFRUCTOKINASE_1_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Glyceraldehyde-3-Phosphate + NAD+ + Pi -> 1,3-Bisphosphoglycerate + NADH + H+ (Glyceraldehyde-3-Phosphate Dehydrogenase)
-            else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == NAD_PLUS) || (mol2.type == GLYCERALDEHYDE_3_PHOSPHATE && mol1.type == NAD_PLUS)) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE);
-                bool phosphatePresent = checkEnzymePresence(molecules, *num_molecules, mol1, INORGANIC_PHOSPHATE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent) && phosphatePresent) {
-                    int delIdx = atomicAdd(numDeletions, 3);
-                    deletionBuffer[delIdx] = idx;
-                    deletionBuffer[delIdx + 1] = j;
-                    // Find and delete an inorganic phosphate molecule
-
-                    int createIdx = atomicAdd(numCreations, 3);
-                    creationBuffer[createIdx] = {_1_3_BISPHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {NADH, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
-                    creationBuffer[createIdx + 2] = {PROTON, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[5], 1);
-                    return;
-                }
+            // Phosphofructokinase-1 Complex + ATP -> Phosphofructokinase-1-ATP Complex
+            else if (mol1.type == PHOSPHOFRUCTOKINASE_1_COMPLEX && mol2.type == ATP) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // 1,3-Bisphosphoglycerate + ADP -> 3-Phosphoglycerate + ATP (Phosphoglycerate Kinase)
-            else if ((mol1.type == _1_3_BISPHOSPHOGLYCERATE && mol2.type == ADP) || (mol2.type == _1_3_BISPHOSPHOGLYCERATE && mol1.type == ADP)) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOGLYCERATE_KINASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 2);
-                    deletionBuffer[delIdx] = idx;
-                    deletionBuffer[delIdx + 1] = j;
-
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {_3_PHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {ATP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[6], 1);
-                    return;
-                }
+            // Fructose-1,6-Bisphosphate + Aldolase -> Fructose-1,6-Bisphosphate-Aldolase Complex
+            else if (mol1.type == FRUCTOSE_1_6_BISPHOSPHATE && mol2.type == ALDOLASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // 3-Phosphoglycerate -> 2-Phosphoglycerate (Phosphoglycerate Mutase)
-            else if (mol1.type == _3_PHOSPHOGLYCERATE || mol2.type == _3_PHOSPHOGLYCERATE) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PHOSPHOGLYCERATE_MUTASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 1);
-                    deletionBuffer[delIdx] = (mol1.type == _3_PHOSPHOGLYCERATE) ? idx : j;
-
-                    int createIdx = atomicAdd(numCreations, 1);
-                    creationBuffer[createIdx] = {_2_PHOSPHOGLYCERATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[7], 1);
-                    return;
-                }
+            // G3P + Aldolase -> G3P-Aldolase Complex
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == ALDOLASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // 2-Phosphoglycerate -> Phosphoenolpyruvate + H2O (Enolase)
-            else if (mol1.type == _2_PHOSPHOGLYCERATE || mol2.type == _2_PHOSPHOGLYCERATE) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, ENOLASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 1);
-                    deletionBuffer[delIdx] = (mol1.type == _2_PHOSPHOGLYCERATE) ? idx : j;
-
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {PHOSPHOENOLPYRUVATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {WATER, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-
-                    atomicAdd(&reactionCounts[8], 1);
-                    return;
-                }
+            // G3P-Aldolase Complex + DHAP -> G3P-Aldolase-DHAP Complex
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX && mol2.type == DIHYDROXYACETONE_PHOSPHATE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
 
-            // Phosphoenolpyruvate + ADP -> Pyruvate + ATP (Pyruvate Kinase)
-            else if ((mol1.type == PHOSPHOENOLPYRUVATE && mol2.type == ADP) || (mol2.type == PHOSPHOENOLPYRUVATE && mol1.type == ADP)) {
-                bool enzymePresent = checkEnzymePresence(molecules, *num_molecules, mol1, PYRUVATE_KINASE);
-                if (shouldReact(&localState, BASE_REACTION_PROBABILITY, enzymePresent)) {
-                    int delIdx = atomicAdd(numDeletions, 2);
-                    deletionBuffer[delIdx] = idx;
-                    deletionBuffer[delIdx + 1] = j;
+            // Dihydroxyacetone Phosphate + Triosephosphate Isomerase -> Triosephosphate Isomerase Complex
+            else if (mol1.type == DIHYDROXYACETONE_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
 
-                    int createIdx = atomicAdd(numCreations, 2);
-                    creationBuffer[createIdx] = {PYRUVATE, mol1.centerOfMass.x, mol1.centerOfMass.y, mol1.centerOfMass.z};
-                    creationBuffer[createIdx + 1] = {ATP, mol2.centerOfMass.x, mol2.centerOfMass.y, mol2.centerOfMass.z};
+            // G3P + Triosephosphate Isomerase -> G3P-Triosephosphate Isomerase Complex
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);    
+                return;
+            }
 
-                    atomicAdd(&reactionCounts[9], 1);
-                    return;
-                }
+            // Glyceraldehyde-3-Phosphate + Glyceraldehyde-3-Phosphate Dehydrogenase -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // Glyceraldehyde-3-Phosphate Dehydrogenase Complex + NAD+ -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX && mol2.type == NAD_PLUS) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+ + Pi -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+-Pi
+            else if (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX && mol2.type == INORGANIC_PHOSPHATE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // 1,3-Bisphosphoglycerate + Phosphoglycerate Kinase -> Phosphoglycerate Kinase Complex
+            else if (mol1.type == _1_3_BISPHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_KINASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PHOSPHOGLYCERATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // Phosphoglycerate Kinase Complex + ADP -> Phosphoglycerate Kinase ADP Complex
+            else if (mol1.type == PHOSPHOGLYCERATE_KINASE_COMPLEX && mol2.type == ADP) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // 3-Phosphoglycerate + Phosphoglycerate Mutase -> Phosphoglycerate Mutase Complex
+            else if (mol1.type == _3_PHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_MUTASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PHOSPHOGLYCERATE_MUTASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // 2-Phosphoglycerate + Enolase -> Enolase Complex
+            else if (mol1.type == _2_PHOSPHOGLYCERATE && mol2.type == ENOLASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, ENOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // Phosphoenolpyruvate + Pyruvate Kinase -> Pyruvate Kinase Complex
+            else if (mol1.type == PHOSPHOENOLPYRUVATE && mol2.type == PYRUVATE_KINASE) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PYRUVATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
+            }
+
+            // Pyruvate Kinase Complex + ADP -> Pyruvate Kinase ADP Complex
+            else if (mol1.type == PYRUVATE_KINASE_COMPLEX && mol2.type == ADP) {
+                processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                states, idx, j, PYRUVATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                return;
             }
         }
     }

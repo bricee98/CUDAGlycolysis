@@ -21,7 +21,13 @@ __global__ void applyForcesAndUpdatePositions(Molecule* molecules, int num_molec
 
 __global__ void initCurand(unsigned long long seed, curandState *state, int num_molecules);
 
-__global__ void handleInteractions(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states, int* reactionCounts, MoleculeCreationInfo* creationBuffer, int* numCreations, int* deletionBuffer, int* numDeletions);
+__global__ void handleReactionsAndDissociations(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states,
+                                   MoleculeCreationInfo* creationBuffer, int* numCreations,
+                                   int* deletionBuffer, int* numDeletions);
+
+__global__ void handleBindings(Molecule* molecules, int* num_molecules, int max_molecules, curandState* states,
+                               MoleculeCreationInfo* creationBuffer, int* numCreations,
+                               int* deletionBuffer, int* numDeletions);
 
 __device__ float3 calculatePairwiseForce(const Molecule& mol1, const Molecule& mol2, float3 r, float distSq);
 

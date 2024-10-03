@@ -6,6 +6,8 @@
 
 // Enumeration for molecule types (unchanged)
 enum MoleculeType {
+    NONE = -1,  // Add this line at the beginning of the enum
+
     // Substrates and products
     GLUCOSE,
     ATP,
@@ -28,7 +30,7 @@ enum MoleculeType {
 
     // Enzymes
     HEXOKINASE,
-    GLUCOSE_6_PHOSPHATE_ISOMERASE,
+    PHOSPHOGLUCOSE_ISOMERASE,
     PHOSPHOFRUCTOKINASE_1,
     ALDOLASE,
     TRIOSEPHOSPHATE_ISOMERASE,
@@ -41,7 +43,29 @@ enum MoleculeType {
     // Regulatory molecules
     AMP,
     CITRATE,
-    FRUCTOSE_2_6_BISPHOSPHATE
+    FRUCTOSE_2_6_BISPHOSPHATE,
+
+    // New enzyme complex types
+    HEXOKINASE_GLUCOSE_COMPLEX,
+    HEXOKINASE_GLUCOSE_ATP_COMPLEX,
+    GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX,
+    FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX,
+    PHOSPHOFRUCTOKINASE_1_COMPLEX,
+    PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX,
+    FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX,
+    DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX,
+    GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX,
+    PHOSPHOGLYCERATE_KINASE_COMPLEX,
+    PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX,
+    PHOSPHOGLYCERATE_MUTASE_COMPLEX,
+    ENOLASE_COMPLEX,
+    PYRUVATE_KINASE_COMPLEX,
+    PYRUVATE_KINASE_ADP_COMPLEX
 };
 
 class Molecule {
@@ -91,6 +115,28 @@ public:
     static __host__ Molecule createCitrate();
     static __host__ Molecule createFructose26Bisphosphate();
 
+    // New static creation functions for enzyme complexes
+    static __host__ Molecule createHexokinaseGlucoseComplex();
+    static __host__ Molecule createHexokinaseGlucoseATPComplex();
+    static __host__ Molecule createGlucose6PhosphateIsomeraseComplex();
+    static __host__ Molecule createFructose6PhosphateIsomeraseComplex();
+    static __host__ Molecule createPhosphofructokinase1Complex();
+    static __host__ Molecule createPhosphofructokinase1ATPComplex();
+    static __host__ Molecule createFructose16BisphosphateAldolaseComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateAldolaseComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateAldolaseDHAPComplex();
+    static __host__ Molecule createDHAPTriosephosphateIsomeraseComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateTriosephosphateIsomeraseComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateDehydrogenaseComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateDehydrogenaseNADPlusComplex();
+    static __host__ Molecule createGlyceraldehyde3PhosphateDehydrogenaseNADPlusInorganicPhosphateComplex();
+    static __host__ Molecule createPhosphoglycerateKinaseComplex();
+    static __host__ Molecule createPhosphoglycerateKinaseADPComplex();
+    static __host__ Molecule createPhosphoglycerateMutaseComplex();
+    static __host__ Molecule createEnolaseComplex();
+    static __host__ Molecule createPyruvateKinaseComplex();
+    static __host__ Molecule createPyruvateKinaseADPComplex();
+
     // Utility functions
     __host__ __device__ float getTotalMass() const { return mass; }
     
@@ -105,6 +151,9 @@ public:
         y = centerOfMass.y;
         z = centerOfMass.z;
     }
+
+    // Add this line with the other static creation functions
+    static __host__ Molecule createNone();
 
 private:
     // Helper functions

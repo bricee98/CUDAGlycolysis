@@ -241,10 +241,13 @@ glm::vec3 getMoleculeColor(MoleculeType type) {
         case PROTON: return glm::vec3(1.0f, 1.0f, 1.0f);  // White
         case INORGANIC_PHOSPHATE: return glm::vec3(0.5f, 0.5f, 0.5f);  // Gray
         case WATER: return glm::vec3(0.0f, 0.5f, 1.0f);  // Light Blue
+        case AMP: return glm::vec3(0.9f, 0.9f, 0.5f);  // Light Yellow
+        case CITRATE: return glm::vec3(0.5f, 0.9f, 0.9f);  // Light Cyan
+        case FRUCTOSE_2_6_BISPHOSPHATE: return glm::vec3(0.9f, 0.5f, 0.9f);  // Light Magenta
 
         // Enzymes
         case HEXOKINASE: return glm::vec3(0.8f, 0.2f, 0.2f);  // Dark Red
-        case GLUCOSE_6_PHOSPHATE_ISOMERASE: return glm::vec3(0.2f, 0.8f, 0.2f);  // Dark Green
+        case PHOSPHOGLUCOSE_ISOMERASE: return glm::vec3(0.2f, 0.8f, 0.2f);  // Dark Green
         case PHOSPHOFRUCTOKINASE_1: return glm::vec3(0.2f, 0.2f, 0.8f);  // Dark Blue
         case ALDOLASE: return glm::vec3(0.8f, 0.8f, 0.2f);  // Dark Yellow
         case TRIOSEPHOSPHATE_ISOMERASE: return glm::vec3(0.8f, 0.2f, 0.8f);  // Dark Magenta
@@ -254,10 +257,27 @@ glm::vec3 getMoleculeColor(MoleculeType type) {
         case ENOLASE: return glm::vec3(0.2f, 0.4f, 0.6f);  // Steel Blue
         case PYRUVATE_KINASE: return glm::vec3(0.6f, 0.2f, 0.4f);  // Maroon
 
-        // Regulatory molecules
-        case AMP: return glm::vec3(0.9f, 0.9f, 0.5f);  // Light Yellow
-        case CITRATE: return glm::vec3(0.5f, 0.9f, 0.9f);  // Light Cyan
-        case FRUCTOSE_2_6_BISPHOSPHATE: return glm::vec3(0.9f, 0.5f, 0.9f);  // Light Magenta
+        // Enzyme complexes
+        case HEXOKINASE_GLUCOSE_COMPLEX: return glm::vec3(0.9f, 0.3f, 0.3f);  // Light Red
+        case HEXOKINASE_GLUCOSE_ATP_COMPLEX: return glm::vec3(0.9f, 0.4f, 0.4f);  // Lighter Red
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return glm::vec3(0.3f, 0.9f, 0.3f);  // Light Green
+        case FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return glm::vec3(0.4f, 0.9f, 0.4f);  // Lighter Green
+        case PHOSPHOFRUCTOKINASE_1_COMPLEX: return glm::vec3(0.3f, 0.3f, 0.9f);  // Light Blue
+        case PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX: return glm::vec3(0.4f, 0.4f, 0.9f);  // Lighter Blue
+        case FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX: return glm::vec3(0.9f, 0.9f, 0.3f);  // Light Yellow
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX: return glm::vec3(0.9f, 0.9f, 0.4f);  // Lighter Yellow
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX: return glm::vec3(0.9f, 0.9f, 0.5f);  // Even Lighter Yellow
+        case DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return glm::vec3(0.9f, 0.3f, 0.9f);  // Light Magenta
+        case GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return glm::vec3(0.9f, 0.4f, 0.9f);  // Lighter Magenta
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX: return glm::vec3(0.3f, 0.9f, 0.9f);  // Light Cyan
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX: return glm::vec3(0.4f, 0.9f, 0.9f);  // Lighter Cyan
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX: return glm::vec3(0.5f, 0.9f, 0.9f);  // Even Lighter Cyan
+        case PHOSPHOGLYCERATE_KINASE_COMPLEX: return glm::vec3(0.7f, 0.5f, 0.3f);  // Light Orange
+        case PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX: return glm::vec3(0.8f, 0.6f, 0.4f);  // Lighter Orange
+        case PHOSPHOGLYCERATE_MUTASE_COMPLEX: return glm::vec3(0.5f, 0.7f, 0.3f);  // Light Olive
+        case ENOLASE_COMPLEX: return glm::vec3(0.3f, 0.5f, 0.7f);  // Light Steel Blue
+        case PYRUVATE_KINASE_COMPLEX: return glm::vec3(0.7f, 0.3f, 0.5f);  // Light Maroon
+        case PYRUVATE_KINASE_ADP_COMPLEX: return glm::vec3(0.8f, 0.4f, 0.6f);  // Lighter Maroon
 
         default: return glm::vec3(0.5f, 0.5f, 0.5f);  // Gray for unknown types
     }
@@ -284,10 +304,13 @@ float getMoleculeSize(MoleculeType type) {
         case PROTON: return 0.3f;
         case INORGANIC_PHOSPHATE: return 0.7f;
         case WATER: return 0.5f;
+        case AMP: return 1.0f;
+        case CITRATE: return 1.0f;
+        case FRUCTOSE_2_6_BISPHOSPHATE: return 1.2f;
 
         // Enzymes (generally larger than substrates and products)
         case HEXOKINASE: return 2.0f;
-        case GLUCOSE_6_PHOSPHATE_ISOMERASE: return 1.9f;
+        case PHOSPHOGLUCOSE_ISOMERASE: return 1.9f;
         case PHOSPHOFRUCTOKINASE_1: return 2.1f;
         case ALDOLASE: return 2.0f;
         case TRIOSEPHOSPHATE_ISOMERASE: return 1.8f;
@@ -297,10 +320,27 @@ float getMoleculeSize(MoleculeType type) {
         case ENOLASE: return 2.0f;
         case PYRUVATE_KINASE: return 2.1f;
 
-        // Regulatory molecules
-        case AMP: return 0.9f;
-        case CITRATE: return 1.0f;
-        case FRUCTOSE_2_6_BISPHOSPHATE: return 1.1f;
+        // Enzyme complexes (slightly larger than individual enzymes)
+        case HEXOKINASE_GLUCOSE_COMPLEX: return 2.1f;
+        case HEXOKINASE_GLUCOSE_ATP_COMPLEX: return 2.2f;
+        case GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return 2.0f;
+        case FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX: return 2.0f;
+        case PHOSPHOFRUCTOKINASE_1_COMPLEX: return 2.2f;
+        case PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX: return 2.3f;
+        case FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX: return 2.1f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX: return 2.1f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX: return 2.2f;
+        case DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return 1.9f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX: return 1.9f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX: return 2.3f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX: return 2.4f;
+        case GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX: return 2.5f;
+        case PHOSPHOGLYCERATE_KINASE_COMPLEX: return 2.1f;
+        case PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX: return 2.2f;
+        case PHOSPHOGLYCERATE_MUTASE_COMPLEX: return 2.0f;
+        case ENOLASE_COMPLEX: return 2.1f;
+        case PYRUVATE_KINASE_COMPLEX: return 2.2f;
+        case PYRUVATE_KINASE_ADP_COMPLEX: return 2.3f;
 
         default: return 0.8f;  // Default size for unknown types
     }

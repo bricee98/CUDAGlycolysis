@@ -24,7 +24,6 @@ std::ofstream logFile("performance_log.txt");
 // Define constants
 #define MAX_MOLECULES 20000
 #define MAX_MOLECULE_TYPES 33
-#define NUM_REACTION_TYPES 10 // Update this as you add more reaction types
 
 // Constants for force calculations
 #define COULOMB_CONSTANT 8.99e9f  // N*m^2/C^2
@@ -77,7 +76,7 @@ const char* getMoleculeTypeName(MoleculeType type) {
         case INORGANIC_PHOSPHATE: return "INORGANIC_PHOSPHATE";
         case WATER: return "WATER";
         case HEXOKINASE: return "HEXOKINASE";
-        case GLUCOSE_6_PHOSPHATE_ISOMERASE: return "GLUCOSE_6_PHOSPHATE_ISOMERASE";
+        case PHOSPHOGLUCOSE_ISOMERASE: return "PHOSPHOGLUCOSE_ISOMERASE";
         case PHOSPHOFRUCTOKINASE_1: return "PHOSPHOFRUCTOKINASE_1";
         case ALDOLASE: return "ALDOLASE";
         case TRIOSEPHOSPHATE_ISOMERASE: return "TRIOSEPHOSPHATE_ISOMERASE";
@@ -137,7 +136,7 @@ Molecule createMolecule(MoleculeType type) {
         // Enzymes
         case HEXOKINASE:
             return Molecule::createHexokinase();
-        case GLUCOSE_6_PHOSPHATE_ISOMERASE:
+        case PHOSPHOGLUCOSE_ISOMERASE:
             return Molecule::createGlucose6PhosphateIsomerase();
         case PHOSPHOFRUCTOKINASE_1:
             return Molecule::createPhosphofructokinase1();
@@ -234,7 +233,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     static Molecule* dev_molecules = nullptr;
     static float3* dev_forces = nullptr;
     static curandState* dev_states = nullptr;
-    static int* dev_reactionCounts = nullptr;
     static int* dev_num_molecules = nullptr;
     static MoleculeCreationInfo* dev_creationBuffer = nullptr;
     static int* dev_numCreations = nullptr;
@@ -295,8 +293,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_forces!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_states, MAX_MOLECULES * sizeof(curandState));
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_states!\n"); return cudaStatus; }
-        cudaStatus = cudaMalloc(&dev_reactionCounts, NUM_REACTION_TYPES * sizeof(int));
-        if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_reactionCounts!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_num_molecules, sizeof(int));
         if (cudaStatus != cudaSuccess) { fprintf(stderr, "cudaMalloc failed for dev_num_molecules!\n"); return cudaStatus; }
         cudaStatus = cudaMalloc((void**)&dev_creationBuffer, MAX_MOLECULES * sizeof(MoleculeCreationInfo));
@@ -331,7 +327,6 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     float memcpyToDeviceTime;
     cudaEventElapsedTime(&memcpyToDeviceTime, start, stop);
 
-    cudaMemset(dev_reactionCounts, 0, NUM_REACTION_TYPES * sizeof(int));
     cudaMemset(dev_numCreations, 0, sizeof(int));
     cudaMemset(dev_numDeletions, 0, sizeof(int));
 
@@ -354,15 +349,15 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     float applyForcesTime;
     cudaEventElapsedTime(&applyForcesTime, start, stop);
 
-    // Timing: Handle interactions kernel
+    // Timing: handle binding reactions kernel
     cudaEventRecord(start);
-    handleInteractions<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
-                                                           dev_reactionCounts, dev_creationBuffer, dev_numCreations,
-                                                           dev_deletionBuffer, dev_numDeletions);
+    handleBindings<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
+                                                      dev_creationBuffer, dev_numCreations,
+                                                      dev_deletionBuffer, dev_numDeletions);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-    float handleInteractionsTime;
-    cudaEventElapsedTime(&handleInteractionsTime, start, stop);
+    float handleBindingsTime;
+    cudaEventElapsedTime(&handleBindingsTime, start, stop);
 
     // Timing: Memory copy from device to host
     cudaEventRecord(start);
@@ -405,15 +400,82 @@ cudaError_t runSimulationStep(SimulationSpace* space, Molecule* molecules) {
     t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> processFlagsTime = t2 - t1;
 
+    // Reset the creation and deletion buffers
+    cudaMemset(dev_numCreations, 0, sizeof(int));
+    cudaMemset(dev_numDeletions, 0, sizeof(int));
+
+    // Timing: copy molecules back to device
+    cudaEventRecord(start);
+    cudaStatus = cudaMemcpy(dev_molecules, molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed for molecules to dev_molecules!\n");
+        return cudaStatus;
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float secondMemcpyToDeviceTime;
+    cudaEventElapsedTime(&secondMemcpyToDeviceTime, start, stop);
+
+    // Timing: handle reactions and dissociations
+    t1 = std::chrono::high_resolution_clock::now();
+    handleReactionsAndDissociations<<<blocksPerGrid, threadsPerBlock>>>(dev_molecules, dev_num_molecules, MAX_MOLECULES, dev_states,
+                                                                     dev_creationBuffer, dev_numCreations,
+                                                                     dev_deletionBuffer, dev_numDeletions);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float handleReactionsTime;
+    cudaEventElapsedTime(&handleReactionsTime, start, stop);
+
+    // Timing: copy molecules back to host
+    cudaEventRecord(start);
+    cudaStatus = cudaMemcpy(molecules, dev_molecules, space->num_molecules * sizeof(Molecule), cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed for dev_molecules to molecules!\n");
+        return cudaStatus;
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float secondMemcpyFromDeviceTime;
+    cudaEventElapsedTime(&secondMemcpyFromDeviceTime, start, stop);
+
+    // Timing: process creation and deletion flags again
+    t1 = std::chrono::high_resolution_clock::now();
+    cudaMemcpy(&h_numCreations, dev_numCreations, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&h_numDeletions, dev_numDeletions, sizeof(int), cudaMemcpyDeviceToHost);
+
+    if (h_numCreations > 0) {
+        h_creationBuffer = new MoleculeCreationInfo[h_numCreations];
+        cudaMemcpy(h_creationBuffer, dev_creationBuffer, h_numCreations * sizeof(MoleculeCreationInfo), cudaMemcpyDeviceToHost);
+    }
+
+    if (h_numDeletions > 0) {
+        h_deletionBuffer = new int[h_numDeletions];
+        cudaMemcpy(h_deletionBuffer, dev_deletionBuffer, h_numDeletions * sizeof(int), cudaMemcpyDeviceToHost);
+    }
+
+    processCreationDeletionFlags(molecules, &space->num_molecules, MAX_MOLECULES,
+                                 h_creationBuffer, h_numCreations,
+                                 h_deletionBuffer, h_numDeletions);
+
+    if (h_creationBuffer) delete[] h_creationBuffer;
+    if (h_deletionBuffer) delete[] h_deletionBuffer;
+
+    t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> secondProcessFlagsTime = t2 - t1;
+
     // Print timing results
     printf("Simulation Step Timings:\n");
     printf("  Memory Allocation: %.3f ms\n", memoryAllocationTime.count());
     printf("  Memory Copy to Device: %.3f ms\n", memcpyToDeviceTime);
     printf("  Assign Molecules to Cells: %.3f ms\n", assignMoleculesTime);
     printf("  Apply Forces and Update Positions: %.3f ms\n", applyForcesTime);
-    printf("  Handle Interactions: %.3f ms\n", handleInteractionsTime);
+    printf("  Handle Bindings: %.3f ms\n", handleBindingsTime);
     printf("  Memory Copy from Device: %.3f ms\n", memcpyFromDeviceTime);
     printf("  Process Creation/Deletion Flags: %.3f ms\n", processFlagsTime.count());
+    printf("  Memory Copy to Device: %.3f ms\n", secondMemcpyToDeviceTime);
+    printf("  Handle Reactions and Dissociations: %.3f ms\n", handleReactionsTime);
+    printf("  Memory Copy from Device: %.3f ms\n", secondMemcpyFromDeviceTime);
+    printf("  Process Creation/Deletion Flags: %.3f ms\n", secondProcessFlagsTime.count());
 
     // Clean up CUDA events
     cudaEventDestroy(start);
