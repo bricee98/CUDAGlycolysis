@@ -44,7 +44,7 @@ const float NANOMETER_TO_WORLD_SCALE = 10.0f;
 const int WINDOW_WIDTH = 1600;
 const int WINDOW_HEIGHT = 900;
 const float TEXT_SCALE = 0.3f;
-const float LINE_HEIGHT = 24.0f;
+const float LINE_HEIGHT = 30.0f;
 const float MAX_CAMERA_DISTANCE = 1000.0f * NANOMETER_TO_WORLD_SCALE;
 const float PAN_SPEED = 50.0f * NANOMETER_TO_WORLD_SCALE;  // Increased speed for noticeable movement
 
@@ -627,7 +627,7 @@ void initVisualization() {
     }
 
     // Create a windowed mode window and its OpenGL context
-    window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Molecular Simulation Visualization", NULL, NULL);
+    window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "CUDAGlycolysis", NULL, NULL);
     if (!window) {
         glfwTerminate();
         exit(EXIT_FAILURE);
