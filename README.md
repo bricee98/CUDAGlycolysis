@@ -57,3 +57,8 @@ There's also a real-time visualization built in.
 - Implement realistic reaction/dissociation probabilities for each enzyme-substrate pair
   
 ![image](https://github.com/user-attachments/assets/49a140fe-c049-4b0c-bb02-7a15592f8444)
+
+## System Requirements:
+- Windows
+- NVIDIA CUDA-enabled GPU
+- CUDA version 12.1
