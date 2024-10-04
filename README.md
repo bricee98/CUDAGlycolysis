@@ -15,8 +15,7 @@ There's also a real-time visualization built in.
 - W/A/S/D: Pan camera
 - Q/Z: Move up/down
 
-![image](https://github.com/user-attachments/assets/2938703b-0125-4657-9808-319b512624f8)
-
+![image](https://github.com/user-attachments/assets/bc280d7f-fdb7-4084-b936-21a67a6456db)
 
 ## Current timing benchmarks for RTX 3070
 ### Simulation Step Timings - 10,000 molecules:
