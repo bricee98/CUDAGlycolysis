@@ -9,7 +9,7 @@ There's also a real-time visualization built in.
 ### R: Toggle visualization rendering
 ### Spacebar: Toggle simulation
 ### W: Write current molecule quantities and time to file
-### L: Toggle logging
+### L: Toggle console logs
 
 ![image](https://github.com/user-attachments/assets/2938703b-0125-4657-9808-319b512624f8)
 
