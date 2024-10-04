@@ -48,6 +48,7 @@ int h_GRID_SIZE_Z = 10;
 // Kernel to assign molecules to cells
 __global__ void assignMoleculesToCells(Molecule* molecules, int num_molecules, Cell* cells, SimulationSpace space, Grid grid) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
     if (idx < num_molecules) {
         Molecule& mol = molecules[idx];
 
@@ -69,7 +70,7 @@ __global__ void assignMoleculesToCells(Molecule* molecules, int num_molecules, C
             cells[cellIndex].moleculeIndices[offset] = idx;
         } else {
             // Handle overflow (e.g., ignore or handle in another way)
-            //printf("Overflow detected in cell %d: offset=%d exceeds MAX_MOLECULES_PER_CELL=%d\n", cellIndex, offset, MAX_MOLECULES_PER_CELL);
+            printf("Overflow detected in cell %d: offset=%d exceeds MAX_MOLECULES_PER_CELL=%d\n", cellIndex, offset, MAX_MOLECULES_PER_CELL);
             // Optionally, you can implement additional handling here
         }
     }
@@ -322,12 +323,12 @@ __device__ void processBindingReaction(Molecule* molecules, int* numDeletions, i
     int idx1, int idx2, MoleculeType product1, MoleculeType product2, MoleculeType product3 = NONE,
     float reactionProbability = 1.0f) {
 
-    printf("Processing binding reaction with reactants");
+    //printf("Processing binding reaction with reactants");
 
     // Check that the reaction proceeds
     if (curand_uniform(&states[idx1]) < 1- reactionProbability) return;
 
-    printf("Processing binding reaction successfully!\n");
+    //printf("Processing binding reaction successfully!\n");
 
     // Delete reactants
     int delIdx = atomicAdd(numDeletions, 2);
@@ -371,7 +372,7 @@ __global__ void handleBindings(Molecule* molecules, int* num_molecules, int max_
 
 
     Molecule& mol1 = molecules[molIdx];
-    curandState localState = states[curThreadIdx];
+    curandState localState = states[threadIdx.x + blockIdx.x * blockDim.x];
 
     // We need to get the list of molecules in the same cell as mol1 or its neighbours
 
@@ -406,200 +407,170 @@ __global__ void handleBindings(Molecule* molecules, int* num_molecules, int max_
         }
     }
 
-    int moleculesToBeProcessed = 0;
-
-    // Check how many molecules are in the same cell or its neighbours
-    for (int i = 0; i < neighbourCount; i++) {
-        int neighbourIndex = neighbourIndices[i];
-        Cell& neighbourCell = cells[neighbourIndex];
-        moleculesToBeProcessed += neighbourCell.count;
-    }
-
-    // Get the count of molecules to be processed by this thread
-    int moleculesToBeProcessedByThisThread = moleculesToBeProcessed / numProcessorThreadsPerMolecule;
-    int startMoleculeCount = processorThreadIdx * moleculesToBeProcessedByThisThread;
-    bool startedProcessing = false;
-    int countedMolecules = 0;
-    int processedMolecules = 0;
+    int counter = 0;
 
     // Go through the neighbour cells and process the molecules in them
     for (int i = 0; i < neighbourCount; i++) {
         int neighbourIndex = neighbourIndices[i];
         Cell& neighbourCell = cells[neighbourIndex];
 
-        // If we haven't started processing yet, count the molecules in the current cell
-        if (!startedProcessing) {
-            if (startMoleculeCount < neighbourCell.count + countedMolecules) {
-                startedProcessing = true;
+        for (int j = 0; j < neighbourCell.count; j++) {
+            if (counter % numProcessorThreadsPerMolecule != processorThreadIdx) {
+                counter++;
+                continue;
             }
             else {
-                countedMolecules += neighbourCell.count;
-            }
-        }
-        if (startedProcessing) {
-            for (int j = 0; j < neighbourCell.count; j++) {
-                if (startMoleculeCount > countedMolecules) {
-                    countedMolecules++;
-                    continue;
-                }
-                else {
-                    countedMolecules++;
-                    processedMolecules++;
+                counter++;
 
-                    int neighbourMoleculeIndex = neighbourCell.moleculeIndices[j];
-                    Molecule& mol2 = molecules[neighbourMoleculeIndex];
-                    if (distanceSquared(mol1, mol2) <= INTERACTION_RADIUS_SQ) {
-                        // Glucose + Hexokinase -> Hexokinase-Glucose Complex
-                        if ((mol1.type == GLUCOSE && mol2.type == HEXOKINASE) || (mol1.type == HEXOKINASE && mol2.type == GLUCOSE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, HEXOKINASE_GLUCOSE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            printf("Creating HEXOKINASE_GLUCOSE_COMPLEX\n");
-                            return;
-                        }
+                int neighbourMoleculeIndex = neighbourCell.moleculeIndices[j];
+                Molecule& mol2 = molecules[neighbourMoleculeIndex];
+                if (distanceSquared(mol1, mol2) <= INTERACTION_RADIUS_SQ) {
+                    // Glucose + Hexokinase -> Hexokinase-Glucose Complex
+                    if ((mol1.type == GLUCOSE && mol2.type == HEXOKINASE) || (mol1.type == HEXOKINASE && mol2.type == GLUCOSE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, HEXOKINASE_GLUCOSE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        //printf("Creating HEXOKINASE_GLUCOSE_COMPLEX\n");
+                        return;
+                    }
 
-                        // Hexokinase-Glucose Complex + ATP -> Hexokinase-Glucose-ATP Complex
-                        else if ((mol1.type == HEXOKINASE_GLUCOSE_COMPLEX && mol2.type == ATP) || (mol1.type == ATP && mol2.type == HEXOKINASE_GLUCOSE_COMPLEX)) {
-                            printf("ATP with Hexokinase-Glucose Complex encountered\n");
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, HEXOKINASE_GLUCOSE_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Hexokinase-Glucose Complex + ATP -> Hexokinase-Glucose-ATP Complex
+                    else if ((mol1.type == HEXOKINASE_GLUCOSE_COMPLEX && mol2.type == ATP) || (mol1.type == ATP && mol2.type == HEXOKINASE_GLUCOSE_COMPLEX)) {
+                        //printf("ATP with Hexokinase-Glucose Complex encountered\n");
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, HEXOKINASE_GLUCOSE_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Glucose-6-Phosphate + Isomerase -> Glucose-6-Phosphate Isomerase Complex
-                        else if ((mol1.type == GLUCOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) || (mol1.type == PHOSPHOGLUCOSE_ISOMERASE && mol2.type == GLUCOSE_6_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Glucose-6-Phosphate + Isomerase -> Glucose-6-Phosphate Isomerase Complex
+                    else if ((mol1.type == GLUCOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) || (mol1.type == PHOSPHOGLUCOSE_ISOMERASE && mol2.type == GLUCOSE_6_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLUCOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Fructose-6-Phosphate + Isomerase -> Fructose-6-Phosphate Isomerase Complex
-                        else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) || (mol1.type == PHOSPHOGLUCOSE_ISOMERASE && mol2.type == FRUCTOSE_6_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Fructose-6-Phosphate + Isomerase -> Fructose-6-Phosphate Isomerase Complex
+                    else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOGLUCOSE_ISOMERASE) || (mol1.type == PHOSPHOGLUCOSE_ISOMERASE && mol2.type == FRUCTOSE_6_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, FRUCTOSE_6_PHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Fructose-6-Phosphate + Phosphofructokinase-1 -> Phosphofructokinase-1 Complex
-                        else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOFRUCTOKINASE_1) || (mol1.type == PHOSPHOFRUCTOKINASE_1 && mol2.type == FRUCTOSE_6_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOFRUCTOKINASE_1_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Fructose-6-Phosphate + Phosphofructokinase-1 -> Phosphofructokinase-1 Complex
+                    else if ((mol1.type == FRUCTOSE_6_PHOSPHATE && mol2.type == PHOSPHOFRUCTOKINASE_1) || (mol1.type == PHOSPHOFRUCTOKINASE_1 && mol2.type == FRUCTOSE_6_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOFRUCTOKINASE_1_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Phosphofructokinase-1 Complex + ATP -> Phosphofructokinase-1-ATP Complex
-                        else if ((mol1.type == PHOSPHOFRUCTOKINASE_1_COMPLEX && mol2.type == ATP) || (mol1.type == ATP && mol2.type == PHOSPHOFRUCTOKINASE_1_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Phosphofructokinase-1 Complex + ATP -> Phosphofructokinase-1-ATP Complex
+                    else if ((mol1.type == PHOSPHOFRUCTOKINASE_1_COMPLEX && mol2.type == ATP) || (mol1.type == ATP && mol2.type == PHOSPHOFRUCTOKINASE_1_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOFRUCTOKINASE_1_ATP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Fructose-1,6-Bisphosphate + Aldolase -> Fructose-1,6-Bisphosphate-Aldolase Complex
-                        else if ((mol1.type == FRUCTOSE_1_6_BISPHOSPHATE && mol2.type == ALDOLASE) || (mol1.type == ALDOLASE && mol2.type == FRUCTOSE_1_6_BISPHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Fructose-1,6-Bisphosphate + Aldolase -> Fructose-1,6-Bisphosphate-Aldolase Complex
+                    else if ((mol1.type == FRUCTOSE_1_6_BISPHOSPHATE && mol2.type == ALDOLASE) || (mol1.type == ALDOLASE && mol2.type == FRUCTOSE_1_6_BISPHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, FRUCTOSE_1_6_BISPHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // G3P + Aldolase -> G3P-Aldolase Complex
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == ALDOLASE) || (mol1.type == ALDOLASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // G3P + Aldolase -> G3P-Aldolase Complex
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == ALDOLASE) || (mol1.type == ALDOLASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // G3P-Aldolase Complex + DHAP -> G3P-Aldolase-DHAP Complex
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX && mol2.type == DIHYDROXYACETONE_PHOSPHATE) || (mol1.type == DIHYDROXYACETONE_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // G3P-Aldolase Complex + DHAP -> G3P-Aldolase-DHAP Complex
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX && mol2.type == DIHYDROXYACETONE_PHOSPHATE) || (mol1.type == DIHYDROXYACETONE_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_ALDOLASE_DHAP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Dihydroxyacetone Phosphate + Triosephosphate Isomerase -> Triosephosphate Isomerase Complex
-                        else if ((mol1.type == DIHYDROXYACETONE_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) || (mol1.type == TRIOSEPHOSPHATE_ISOMERASE && mol2.type == DIHYDROXYACETONE_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Dihydroxyacetone Phosphate + Triosephosphate Isomerase -> Triosephosphate Isomerase Complex
+                    else if ((mol1.type == DIHYDROXYACETONE_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) || (mol1.type == TRIOSEPHOSPHATE_ISOMERASE && mol2.type == DIHYDROXYACETONE_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, DHAP_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // G3P + Triosephosphate Isomerase -> G3P-Triosephosphate Isomerase Complex
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) || (mol1.type == TRIOSEPHOSPHATE_ISOMERASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);    
-                            return;
-                        }
+                    // G3P + Triosephosphate Isomerase -> G3P-Triosephosphate Isomerase Complex
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == TRIOSEPHOSPHATE_ISOMERASE) || (mol1.type == TRIOSEPHOSPHATE_ISOMERASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_TRIOSEPHOSPHATE_ISOMERASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);    
+                        return;
+                    }
 
-                        // Glyceraldehyde-3-Phosphate + Glyceraldehyde-3-Phosphate Dehydrogenase -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE) || (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Glyceraldehyde-3-Phosphate + Glyceraldehyde-3-Phosphate Dehydrogenase -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE) || (mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Glyceraldehyde-3-Phosphate Dehydrogenase Complex + NAD+ -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX && mol2.type == NAD_PLUS) || (mol1.type == NAD_PLUS && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Glyceraldehyde-3-Phosphate Dehydrogenase Complex + NAD+ -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX && mol2.type == NAD_PLUS) || (mol1.type == NAD_PLUS && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+ + Pi -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+-Pi
-                        else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX && mol2.type == INORGANIC_PHOSPHATE) || (mol1.type == INORGANIC_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+ + Pi -> Glyceraldehyde-3-Phosphate Dehydrogenase Complex-NAD+-Pi
+                    else if ((mol1.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX && mol2.type == INORGANIC_PHOSPHATE) || (mol1.type == INORGANIC_PHOSPHATE && mol2.type == GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, GLYCERALDEHYDE_3_PHOSPHATE_DEHYDROGENASE_NAD_PLUS_INORGANIC_PHOSPHATE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // 1,3-Bisphosphoglycerate + Phosphoglycerate Kinase -> Phosphoglycerate Kinase Complex
-                        else if ((mol1.type == _1_3_BISPHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_KINASE) || (mol1.type == PHOSPHOGLYCERATE_KINASE && mol2.type == _1_3_BISPHOSPHOGLYCERATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // 1,3-Bisphosphoglycerate + Phosphoglycerate Kinase -> Phosphoglycerate Kinase Complex
+                    else if ((mol1.type == _1_3_BISPHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_KINASE) || (mol1.type == PHOSPHOGLYCERATE_KINASE && mol2.type == _1_3_BISPHOSPHOGLYCERATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Phosphoglycerate Kinase Complex + ADP -> Phosphoglycerate Kinase ADP Complex
-                        else if ((mol1.type == PHOSPHOGLYCERATE_KINASE_COMPLEX && mol2.type == ADP) || (mol1.type == ADP && mol2.type == PHOSPHOGLYCERATE_KINASE_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Phosphoglycerate Kinase Complex + ADP -> Phosphoglycerate Kinase ADP Complex
+                    else if ((mol1.type == PHOSPHOGLYCERATE_KINASE_COMPLEX && mol2.type == ADP) || (mol1.type == ADP && mol2.type == PHOSPHOGLYCERATE_KINASE_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // 3-Phosphoglycerate + Phosphoglycerate Mutase -> Phosphoglycerate Mutase Complex
-                        else if ((mol1.type == _3_PHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_MUTASE) || (mol1.type == PHOSPHOGLYCERATE_MUTASE && mol2.type == _3_PHOSPHOGLYCERATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_MUTASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // 3-Phosphoglycerate + Phosphoglycerate Mutase -> Phosphoglycerate Mutase Complex
+                    else if ((mol1.type == _3_PHOSPHOGLYCERATE && mol2.type == PHOSPHOGLYCERATE_MUTASE) || (mol1.type == PHOSPHOGLYCERATE_MUTASE && mol2.type == _3_PHOSPHOGLYCERATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PHOSPHOGLYCERATE_MUTASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // 2-Phosphoglycerate + Enolase -> Enolase Complex
-                        else if ((mol1.type == _2_PHOSPHOGLYCERATE && mol2.type == ENOLASE) || (mol1.type == ENOLASE && mol2.type == _2_PHOSPHOGLYCERATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, ENOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // 2-Phosphoglycerate + Enolase -> Enolase Complex
+                    else if ((mol1.type == _2_PHOSPHOGLYCERATE && mol2.type == ENOLASE) || (mol1.type == ENOLASE && mol2.type == _2_PHOSPHOGLYCERATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, ENOLASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Phosphoenolpyruvate + Pyruvate Kinase -> Pyruvate Kinase Complex
-                        else if ((mol1.type == PHOSPHOENOLPYRUVATE && mol2.type == PYRUVATE_KINASE) || (mol1.type == PYRUVATE_KINASE && mol2.type == PHOSPHOENOLPYRUVATE)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PYRUVATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Phosphoenolpyruvate + Pyruvate Kinase -> Pyruvate Kinase Complex
+                    else if ((mol1.type == PHOSPHOENOLPYRUVATE && mol2.type == PYRUVATE_KINASE) || (mol1.type == PYRUVATE_KINASE && mol2.type == PHOSPHOENOLPYRUVATE)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PYRUVATE_KINASE_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
+                    }
 
-                        // Pyruvate Kinase Complex + ADP -> Pyruvate Kinase ADP Complex
-                        else if ((mol1.type == PYRUVATE_KINASE_COMPLEX && mol2.type == ADP) || (mol1.type == ADP && mol2.type == PYRUVATE_KINASE_COMPLEX)) {
-                            processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
-                                            states, curThreadIdx, neighbourMoleculeIndex, PYRUVATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
-                            return;
-                        }
+                    // Pyruvate Kinase Complex + ADP -> Pyruvate Kinase ADP Complex
+                    else if ((mol1.type == PYRUVATE_KINASE_COMPLEX && mol2.type == ADP) || (mol1.type == ADP && mol2.type == PYRUVATE_KINASE_COMPLEX)) {
+                        processBindingReaction(molecules, numDeletions, numCreations, deletionBuffer, creationBuffer,
+                                        states, curThreadIdx, neighbourMoleculeIndex, PYRUVATE_KINASE_ADP_COMPLEX, NONE, NONE, REACTION_PROBABILITY);
+                        return;
                     }
                 }
             }
         }
-
-        if (processedMolecules == moleculesToBeProcessedByThisThread && !isLastThreadForThisMolecule) {
-            break;
-        }
     }
-    states[curThreadIdx] = localState;
+    states[threadIdx.x + blockIdx.x * blockDim.x] = localState;
 }
 
 // Kernel to apply forces and update positions

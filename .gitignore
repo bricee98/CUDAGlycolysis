@@ -51,3 +51,4 @@ TestCUDAProj/x64/Debug/TestCUDAProj.tlog/link.read.1.tlog
 *.pdb
 TestCUDAProj/x64/Debug/TestCUDAProj.vcxproj.FileListAbsolute.txt
 TestCUDAProj/TestCUDAProj.sln
+CUDAGlycolysis/output.txt
