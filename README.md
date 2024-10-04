@@ -5,15 +5,15 @@ It leverages parallel processing with CUDA to efficiently compute motino and pai
 
 There's also a real-time visualization built in.
 
-## Simulation Controls
-### R: Toggle visualization rendering
-### Spacebar: Toggle simulation
-### W: Write current molecule quantities and time to file
-### L: Toggle console logs
+### Simulation Controls
+- R: Toggle visualization rendering
+- Spacebar: Toggle simulation
+- W: Write current molecule quantities and time to file
+- L: Toggle console logs
 
-## Visualization Controls
-### W/A/S/D: Pan camera
-### Q/Z: Move up/down
+### Visualization Controls
+- W/A/S/D: Pan camera
+- Q/Z: Move up/down
 
 ![image](https://github.com/user-attachments/assets/2938703b-0125-4657-9808-319b512624f8)
 
