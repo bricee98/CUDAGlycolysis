@@ -1,7 +1,7 @@
 # CUDA Glycolysis
 It's glycolysis in a box! This program simulates Brownian motion of the molecules and enzymes involved in the glycolysis pathway to show how the process progresses over time under various conditions.
 
-It leverages parallel processing with CUDA to efficiently compute motino and pairwise interactions between many molecules - up to 100,000,000 molecules have been successfully simulated on an RTX3070.
+It leverages parallel processing with CUDA to efficiently compute motino and pairwise interactions between many molecules - up to 100,000,000 molecules have been successfully simulated on an RTX 3070.
 
 There's also a real-time visualization built in.
 
