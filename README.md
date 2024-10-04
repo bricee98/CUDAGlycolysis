@@ -1,19 +1,55 @@
+# CUDA Glycolysis
+It's glycolysis in a box! This program simulates Brownian motion of the molecules and enzymes involved in the glycolysis pathway to show how the process progresses over time under various conditions.
+
+It leverages parallel processing with CUDA to efficiently compute pairwise interactions between many molecules - up to 100,000,000 molecules have been successfully simulated on an RTX3070.
+
+There's also a real-time visualization built in.
+
+## Simulation Controls
+### R: Toggle visualization rendering
+### Spacebar: Toggle simulation
+### W: Write current molecule quantities and time to file
+### L: Toggle logging
+
 ![image](https://github.com/user-attachments/assets/2938703b-0125-4657-9808-319b512624f8)
 
-This is a basic implementation of a nanometer- and microsecond- scale simulation model of glycolysis using CUDA. It has a visualization utility built in to visualize the molecular motion in 3D space.
 
-#Current timing benchmarks for RTX 3070#
-Frame Timings:
-  Total Loop Time: 15.529 ms
-  Render Time: 2.313 ms
-  Simulation Time: 13.216 ms
-Simulation Step Timings:
-  Memory Allocation: 0.013 ms
-  Memory Copy to Device: 0.579 ms
-  Assign Molecules to Cells: 0.008 ms
-  Apply Forces and Update Positions: 0.008 ms
-  Handle Interactions: 11.970 ms
-  Memory Copy from Device: 0.058 ms
-  Process Creation/Deletion Flags: 0.024 ms
+## Current timing benchmarks for RTX 3070
+### Simulation Step Timings - 10,000 molecules:
+  Memory Allocation: 0.088 ms
+  Reset Cells: 0.064 ms
+  Memory Copy to Device: 0.087 ms
+  Assign Molecules to Cells: 0.023 ms
+  Apply Forces and Update Positions: 0.034 ms
+  Handle Bindings: 0.106 ms
+  Memory Copy from Device: 0.109 ms
+  Process Creation/Deletion Flags: 0.028 ms
+  Reset Creation/Deletion Buffers: 0.012 ms
+  Memory Copy to Device: 0.069 ms
+  Handle Reactions and Dissociations: 0.094 ms
+  Memory Copy from Device: 0.119 ms
+  Process Creation/Deletion Flags: 0.028 ms
+  Total Calculated Time: 0.862 ms
 
+### Simulation Step Timings - 100,000,000 molecules:
+  Memory Allocation: 1.319 ms
+  Reset Cells: 1.299 ms
+  Memory Copy to Device: 366.517 ms
+  Assign Molecules to Cells: 0.026 ms
+  Apply Forces and Update Positions: 0.025 ms
+  Handle Bindings: 0.009 ms
+  Memory Copy from Device: 69.871 ms
+  Process Creation/Deletion Flags: 0.033 ms
+  Reset Creation/Deletion Buffers: 0.008 ms
+  Memory Copy to Device: 69.114 ms
+  Handle Reactions and Dissociations: 69.214 ms
+  Memory Copy from Device: 70.441 ms
+  Process Creation/Deletion Flags: 0.026 ms
+  Total Calculated Time: 647.902 ms
+
+## Future improvements:
+- Compute molecule creation/deletion on GPU so that memory doesn't need to be copied every cycle
+- Implement effects of regulatory molecules
+- Implement realistic reaction/dissociation probabilities for each enzyme-substrate pair
+  
 ![image](https://github.com/user-attachments/assets/49a140fe-c049-4b0c-bb02-7a15592f8444)
